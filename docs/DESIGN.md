@@ -1,6 +1,10 @@
 # Design: full on-device port
 
-Goal: the porter's whole pipeline (extract, shader split and translate, build host, package, install) runs natively on Android.
+Goal: the porter's whole pipeline (extract, shader split and translate, build host, package, install) runs on the phone with one-tap setup.
+
+## Decision (2026-11-13): runtime stays Ubuntu + proot
+
+Chosen by the project owner: reuse the proven stack (Ubuntu under proot, the predecessor's ready-made glibc .NET tools) and build the one-tap setup, the full game list and adb pairing on top. The no-proot runtime (questions 1-4 below) stays a later option; `docs/SPIKE_DOTNET.md` and `tools/make_bionic_tools.sh` keep the first step of it. Costs accepted for now: old target API (no Google Play), proot speed, Android 14 developer settings for long builds.
 
 Facts below come from the predecessor project's handover; options are suggestions to verify, not findings.
 
