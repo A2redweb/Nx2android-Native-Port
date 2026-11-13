@@ -1,1 +1,8 @@
+*.jks
+.gradle/
 CLAUDE.md
+__pycache__/
+app/src/main/assets/rootfs.bin
+app/src/main/jniLibs/
+build/
+local.properties
