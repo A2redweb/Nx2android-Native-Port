@@ -4,6 +4,8 @@
 //! The second sector (file offset 0x200) holds the magic `NCA3` or `NCA2`, the content type at +5 (1 = meta) and the title ID at +0x10. Only a meta NCA's title ID is the dump's own:
 //! an update's program and control NCAs carry the base game's title ID. An NSZ keeps its NCA's header as it is.
 
+pub mod section;
+
 use nx_container::{dump_files, Entry};
 use nx_crypto::Xts;
 use nx_keys::Keys;
