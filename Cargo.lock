@@ -7,8 +7,21 @@ name = "nx-container"
 version = "0.1.0"
 
 [[package]]
+name = "nx-crypto"
+version = "0.1.0"
+
+[[package]]
 name = "nx-keys"
 version = "0.1.0"
+
+[[package]]
+name = "nx-nca"
+version = "0.1.0"
+dependencies = [
+ "nx-container",
+ "nx-crypto",
+ "nx-keys",
+]
 
 [[package]]
 name = "nx-profile"
@@ -20,5 +33,6 @@ version = "0.1.0"
 dependencies = [
  "nx-container",
  "nx-keys",
+ "nx-nca",
  "nx-profile",
 ]
