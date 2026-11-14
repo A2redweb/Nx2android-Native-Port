@@ -1,0 +1,23 @@
+name: bionic-tools
+# Spike 1: can the porter's .NET tools be built for Android itself (no proot)?
+on:
+  workflow_dispatch:
+    inputs:
+      upstream:
+        description: shirai91/nx2android commit or branch
+        default: main
+jobs:
+  build:
+    runs-on: ubuntu-latest   # the NDK's own tools are x86-64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '10.0.x' }
+      - name: Fetch upstream porter
+        run: |
+          mkdir -p /tmp/up && curl -fsSL "https://codeload.github.com/shirai91/nx2android/tar.gz/${{ inputs.upstream }}" | tar -xz -C /tmp/up --strip-components=1
+          echo "KEY=$(python3 tools/prebuilt_key.py /tmp/up)" >> "$GITHUB_ENV"
+      - name: Build both tools for linux-bionic-arm64
+        run: bash tools/make_bionic_tools.sh /tmp/up /tmp/out
+      - uses: actions/upload-artifact@v4
+        with: { name: 'bionic-tools-${{ env.KEY }}', path: /tmp/out }
