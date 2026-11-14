@@ -70,6 +70,8 @@ struct Status {
     stage: String,
     message: String,
     title_id: u64,
+    name: String,
+    display_version: String,
     exefs_files: usize,
     romfs_files: usize,
     romfs_bytes: u64,
@@ -119,7 +121,7 @@ pub fn start_extract(r: ExtractRequest) -> u32 {
     static NEXT: AtomicU32 = AtomicU32::new(1);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let job = Arc::new(Job {
-        status: Mutex::new(Status { state: State::Running, stage: "Starting".into(), message: String::new(), title_id: 0, exefs_files: 0, romfs_files: 0, romfs_bytes: 0 }),
+        status: Mutex::new(Status { state: State::Running, stage: "Starting".into(), message: String::new(), title_id: 0, name: String::new(), display_version: String::new(), exefs_files: 0, romfs_files: 0, romfs_bytes: 0 }),
         bytes: AtomicU64::new(0),
     });
     if let Ok(mut m) = jobs().lock() {
@@ -130,6 +132,8 @@ pub fn start_extract(r: ExtractRequest) -> u32 {
             s.state = State::Done;
             s.stage = "Done".into();
             s.title_id = rep.title_id;
+            s.name = rep.name;
+            s.display_version = rep.display_version;
             s.exefs_files = rep.exefs_files;
             s.romfs_files = rep.romfs_files;
             s.romfs_bytes = rep.romfs_bytes;
@@ -149,7 +153,7 @@ pub fn status_json(id: u32) -> String {
     let s = job.status.lock().map(|s| s.clone());
     let Ok(s) = s else { return "{\"error\":\"status unavailable\"}".into() };
     format!(
-        "{{\"id\":{id},\"state\":\"{}\",\"stage\":{},\"message\":{},\"bytes\":{},\"title_id\":\"{:016x}\",\"exefs_files\":{},\"romfs_files\":{},\"romfs_bytes\":{}}}",
+        "{{\"id\":{id},\"state\":\"{}\",\"stage\":{},\"message\":{},\"bytes\":{},\"title_id\":\"{:016x}\",\"name\":{},\"display_version\":{},\"exefs_files\":{},\"romfs_files\":{},\"romfs_bytes\":{}}}",
         match s.state {
             State::Running => "running",
             State::Done => "done",
@@ -159,6 +163,8 @@ pub fn status_json(id: u32) -> String {
         json_str(&s.message),
         job.bytes.load(Ordering::Relaxed),
         s.title_id,
+        json_str(&s.name),
+        json_str(&s.display_version),
         s.exefs_files,
         s.romfs_files,
         s.romfs_bytes

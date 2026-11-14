@@ -164,7 +164,7 @@ class MainActivity : Activity() {
             val s = JSONObject(Core.nativeStatus(id))
             val line = when (s.optString("state")) {
                 "running" -> "${Ports.title}: ${s.optString("stage")}, ${s.optLong("bytes") shr 20} MB"
-                "done" -> "${Ports.title}: extracted (title ${s.optString("title_id")}, ${s.optInt("romfs_files")} RomFS files)"
+                "done" -> "${s.optString("name").ifEmpty { Ports.title }} ${s.optString("display_version")}: extracted (title ${s.optString("title_id")}, ${s.optInt("romfs_files")} RomFS files)"
                 "failed" -> "${Ports.title}: failed: ${s.optString("message")}"
                 else -> ""
             }

@@ -4,6 +4,8 @@
 //! opens their sections with the right key (key area or title key) and writes `ExeFS/`, `RomFS/` and `control.nacp`.
 //! Not done yet: an update layered over the base (BKTR), compressed dumps (NSZ/XCZ), hash checks of the section data, add-on content.
 
+pub mod nacp;
+
 use nx_container::{dump_files, Entry, Kind};
 use nx_fs::SubReader;
 use nx_keys::Keys;
@@ -166,6 +168,9 @@ pub struct Report {
     pub romfs_files: usize,
     pub romfs_bytes: u64,
     pub nacp: bool,
+    /// from control.nacp
+    pub name: String,
+    pub display_version: String,
 }
 
 /// Writes `ExeFS/`, `RomFS/` and `control.nacp` of the base game in `r` under `out`.
@@ -230,9 +235,25 @@ pub fn extract_game<R: Read + Seek, U: Read + Seek>(mut base: Package<R>, mut up
                 (true, Some(u)) => rep.nacp = control(&mut u.data(&ctrl, &s, keys)?, out)?,
                 _ => rep.nacp = control(&mut base.data(&ctrl, &s, keys)?, out)?,
             }
+            if let Ok(b) = fs::read(out.join("control.nacp")) {
+                let n = nacp::parse(&b);
+                rep.name = n.name;
+                rep.display_version = n.display_version;
+            }
         }
     }
     Ok(rep)
+}
+
+pub const CONTENT_DATA: u8 = 4;
+pub const CONTENT_PUBLIC_DATA: u8 = 5;
+
+/// Add-on content (a DLC NSP): the RomFS of its data NCA is written to `out` (the host mounts it as the game's DLC folder). Returns the DLC's title ID and its file count.
+pub fn extract_aoc<R: Read + Seek>(mut dlc: Package<R>, keys: &Keys, out: &Path) -> Result<(u64, usize), Error> {
+    let Some(data) = dlc.pick(CONTENT_PUBLIC_DATA, None).or_else(|| dlc.pick(CONTENT_DATA, None)).cloned() else { return msg("no data NCA in the DLC dump") };
+    let Some(sec) = data.header.sections.iter().find(|s| s.fs_type == FS_ROMFS).cloned() else { return msg("the DLC's data NCA has no RomFS section") };
+    let (n, _) = nx_fs::extract_romfs(&mut dlc.data(&data, &sec, keys)?, out)?;
+    Ok((data.header.title_id, n))
 }
 
 /// `control.nacp` and the game's icon from a control NCA's RomFS.
@@ -577,6 +598,25 @@ mod tests {
         assert_ne!(fs::read(out.join("RomFS/data.bin")).unwrap(), big);
         assert_eq!(fs::read(out.join("RomFS/a.txt")).unwrap(), b"hello");
         fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn extracts_add_on_content() {
+        let rights = {
+            let mut r = [0u8; 16];
+            r[..8].copy_from_slice(&0x0100_AAAA_0000_1001u64.to_be_bytes());
+            r[15] = 2;
+            r
+        };
+        let rom = romfs(&[("dlc.bin", vec![5; 100])]);
+        let data = nca(CONTENT_PUBLIC_DATA, 0x0100_AAAA_0000_1001, &[(FS_ROMFS, rom)], [0x99; 16], rights);
+        let nsp = pfs0(&[("d.nca", data), ("t.tik", tik(rights, [0x99; 16]))]);
+        let out = std::env::temp_dir().join(format!("nx-extract-aoc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&out);
+        let (id, n) = extract_aoc(Package::open(Cursor::new(nsp), &keys(), "dlc.nsp").unwrap(), &keys(), &out).unwrap();
+        assert_eq!((id, n), (0x0100_AAAA_0000_1001, 1));
+        assert_eq!(fs::read(out.join("dlc.bin")).unwrap(), vec![5; 100]);
+        let _ = fs::remove_dir_all(&out);
     }
 
     const CONTROL_FOR_TEST: u8 = CONTENT_CONTROL;
