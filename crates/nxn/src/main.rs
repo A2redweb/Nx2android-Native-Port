@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 fn usage() -> ExitCode {
-    eprintln!("usage:\n  nxn games <profiles dir> [--all] [--json] [--overlay <overlay_default.tsv>]\n  nxn dump <file>\n  nxn keys <prod.keys>\n  nxn title <file> [<prod.keys>]\n  nxn extract <prod.keys> <dump> <out dir> [--update <update dump>]");
+    eprintln!("usage:\n  nxn games <profiles dir> [--all] [--json] [--overlay <overlay_default.tsv>]\n  nxn dump <file>\n  nxn keys <prod.keys>\n  nxn title <file> [<prod.keys>]\n  nxn extract <prod.keys> <dump> <out dir> [--update <update dump>]\n  nxn decompress <dump.nsz|xcz> <out.nsp>");
     ExitCode::from(2)
 }
 
@@ -91,14 +91,36 @@ fn extract(args: &[String]) -> Result<(), String> {
     };
     let [keys, dump, out] = a[..] else { return Err("extract needs <prod.keys> <dump> <out dir> [--update <update dump>]".into()) };
     let keys = nx_keys::Keys::load(Path::new(keys)).map_err(|e| format!("{keys}: {e}"))?;
-    let open = |p: &str| File::open(p).map(BufReader::new).map_err(|e| format!("{p}: {e}"));
-    let base = nx_extract::Package::open(open(dump)?, &keys, dump).map_err(|e| e.to_string())?;
+    let tmp = Path::new(out).join(".tmp");
+    let mut done = 0u64;
+    let mut progress = |n: u64| {
+        let before = done >> 28;
+        done += n;
+        if done >> 28 != before {
+            eprintln!("  decompressed {} MB", done >> 20);
+        }
+    };
+    let base = nx_extract::open_path(Path::new(dump), &keys, &tmp, &mut progress).map_err(|e| e.to_string())?;
     let upd = match &upd {
-        Some(u) => Some(nx_extract::Package::open(open(u)?, &keys, u).map_err(|e| e.to_string())?),
+        Some(u) => Some(nx_extract::open_path(Path::new(u), &keys, &tmp, &mut progress).map_err(|e| e.to_string())?),
         None => None,
     };
-    let r = nx_extract::extract_game(base, upd, &keys, Path::new(out)).map_err(|e| e.to_string())?;
+    let bp = base.package;
+    let upd_pkg = upd.map(|u| u.package);
+    let r = nx_extract::extract_game(bp, upd_pkg, &keys, Path::new(out)).map_err(|e| e.to_string());
+    let _ = std::fs::remove_dir_all(&tmp); // the decompressed copies, if any
+    let r = r?;
     println!("title {:016x}: ExeFS {} files, RomFS {} files ({:.1} MB), control.nacp {}", r.title_id, r.exefs_files, r.romfs_files, r.romfs_bytes as f64 / 1048576.0, if r.nacp { "written" } else { "not found" });
+    Ok(())
+}
+
+fn decompress(args: &[String]) -> Result<(), String> {
+    let [src, dst] = args else { return Err("decompress needs <dump.nsz|xcz> <out.nsp>".into()) };
+    let mut f = File::open(src).map(BufReader::new).map_err(|e| format!("{src}: {e}"))?;
+    let mut o = std::io::BufWriter::new(File::create(dst).map_err(|e| format!("{dst}: {e}"))?);
+    let mut n = 0u64;
+    nx_nsz::decompress(&mut f, &mut o, src, &mut |k| n += k).map_err(|e| e.to_string())?;
+    println!("{dst}: {:.1} MB written", n as f64 / 1048576.0);
     Ok(())
 }
 
@@ -110,6 +132,7 @@ fn main() -> ExitCode {
         Some("keys") => keys(&args[1..]),
         Some("title") => title(&args[1..]),
         Some("extract") => extract(&args[1..]),
+        Some("decompress") => decompress(&args[1..]),
         _ => return usage(),
     };
     match r {

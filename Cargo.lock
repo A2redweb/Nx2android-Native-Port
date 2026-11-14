@@ -19,6 +19,7 @@ dependencies = [
  "nx-fs",
  "nx-keys",
  "nx-nca",
+ "nx-nsz",
 ]
 
 [[package]]
@@ -42,7 +43,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nx-nsz"
+version = "0.1.0"
+dependencies = [
+ "nx-container",
+ "nx-crypto",
+ "nx-zstd",
+]
+
+[[package]]
 name = "nx-profile"
+version = "0.1.0"
+
+[[package]]
+name = "nx-zstd"
 version = "0.1.0"
 
 [[package]]
@@ -53,5 +67,6 @@ dependencies = [
  "nx-extract",
  "nx-keys",
  "nx-nca",
+ "nx-nsz",
  "nx-profile",
 ]

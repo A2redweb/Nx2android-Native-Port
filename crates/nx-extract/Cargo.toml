@@ -10,3 +10,4 @@ nx-container = { path = "../nx-container" }
 nx-keys = { path = "../nx-keys" }
 nx-nca = { path = "../nx-nca" }
 nx-fs = { path = "../nx-fs" }
+nx-nsz = { path = "../nx-nsz" }
