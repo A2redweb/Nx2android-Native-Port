@@ -100,9 +100,9 @@ fn extract(args: &[String]) -> Result<(), String> {
             eprintln!("  decompressed {} MB", done >> 20);
         }
     };
-    let base = nx_extract::open_path(Path::new(dump), &keys, &tmp, &mut progress).map_err(|e| e.to_string())?;
+    let base = nx_extract::open_path(Path::new(dump), dump, &keys, &tmp, &mut progress).map_err(|e| e.to_string())?;
     let upd = match &upd {
-        Some(u) => Some(nx_extract::open_path(Path::new(u), &keys, &tmp, &mut progress).map_err(|e| e.to_string())?),
+        Some(u) => Some(nx_extract::open_path(Path::new(u), u, &keys, &tmp, &mut progress).map_err(|e| e.to_string())?),
         None => None,
     };
     let bp = base.package;

@@ -126,14 +126,15 @@ impl Opened {
     }
 }
 
-pub fn open_path(path: &Path, keys: &Keys, tmp: &Path, progress: &mut dyn FnMut(u64)) -> Result<Opened, Error> {
-    let shown = path.display().to_string();
+/// `name` is the dump's own file name (what decides whether it is compressed); `path` may be a descriptor path such as `/proc/self/fd/7` that has no extension.
+pub fn open_path(path: &Path, name: &str, keys: &Keys, tmp: &Path, progress: &mut dyn FnMut(u64)) -> Result<Opened, Error> {
+    let shown = name.to_string();
     let f = fs::File::open(path).map_err(|e| Error::Msg(format!("{shown}: {e}")))?;
-    if !nx_nsz::is_compressed(path) {
+    if !nx_nsz::is_compressed(Path::new(name)) {
         return Ok(Opened { package: Package::open(std::io::BufReader::new(f), keys, &shown)?, temp: None });
     }
     fs::create_dir_all(tmp)?;
-    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "dump".into());
+    let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "dump".into());
     let dst = tmp.join(format!("{stem}.nsp"));
     let partial = tmp.join(format!("{stem}.nsp.partial"));
     let res = (|| -> io::Result<()> {
