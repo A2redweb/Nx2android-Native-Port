@@ -20,9 +20,16 @@ Early. Done and tested on a PC:
 | `nx-nso` | NSO/NRO header, LZ4, memory image, segment hashes, build ID | Hand-made vectors and round trips; no real module yet |
 | `nx-fs` | RomFS reader, PFS0 and RomFS extraction, safe path joining | Synthetic images |
 | `nx-extract` | Game from an NSP/XCI, with an update layered over it (BKTR): ExeFS, RomFS, control.nacp (tickets, key area and title keys) | End-to-end on a synthetic NSP; not a real dump |
+| `nx-core` | What the app calls: games list, keys check, extraction jobs polled as JSON | Unit tests (errors, junk dump, JSON) |
+| `nx-jni` | `libnxcore.so`: five JNI functions, strings and ints only | Symbols checked with `nm`; never loaded on a device |
 | `nxn` | Command line for the above | |
 
-Not done: section hash checks, DLC, the NSO rewriter, shaders, the Android app, the code rewriter, shaders, the Android app. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the stage-by-stage plan, what is measured and what is a proposal.
+Not done: section hash checks, DLC, the NSO rewriter, shaders, the host build and the packaging of a runnable game.
+
+## The app (android/)
+
+Written, **never built or run**: this environment has no Android SDK, NDK or network. It is one screen of native views (no WebView): choose `prod.keys`, choose the folder with your dumps, tap a dump to extract it (optionally with an update). Extraction runs in a foreground service (type dataSync) and survives the screen turning off. Files are read through storage-access descriptors, so no storage permission and no adb. What it produces today is the extracted ExeFS / RomFS / control data in the app's own storage; turning that into a playable game is the unfinished part of the pipeline above.
+`.github/workflows/android.yml` builds it (cargo-ndk, 16 KiB page alignment, Gradle, SDK 36); the first run will show what is wrong. Locally: `sh tools/build_android.sh`., the code rewriter, shaders, the Android app. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the stage-by-stage plan, what is measured and what is a proposal.
 
 ```
 cargo test

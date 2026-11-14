@@ -7,3 +7,9 @@ app/src/main/assets/rootfs.bin
 app/src/main/jniLibs/
 build/
 local.properties
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/app/src/main/jniLibs/
+/android/app/src/main/assets/games/
+/android/local.properties

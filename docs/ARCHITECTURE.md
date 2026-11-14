@@ -64,9 +64,9 @@ A command-line face of the core (`nxn`) runs on a PC or in Termux, so each Rust 
 ## Milestones
 
 1. **Done:** profiles, container listing, keys, CLI, tests.
-2. **Extraction in Rust** (`nx-nca`, `nx-fs`): decrypt headers, read RomFS/ExeFS, layer the update. Check against `nx_extract` output on a real dump, file by file.
-3. **Code rewriter in Rust** (`nx-nso`): output compared byte for byte with `patch_nso.py` for one game.
+2. **Extraction in Rust** (`nx-nca`, `nx-fs`, `nx-extract`, `nx-nsz`, `nx-zstd`): **written and tested on synthetic images**. Still to do: check against `nx_extract` output on a real dump, file by file; hash checks; DLC and system data.
+3. **Code rewriter in Rust** (`nx-nso`): NSO/NRO parsing, LZ4 and the image are done. The rewriter itself (AArch64 decoding, x18 and system-register rewrites, spin-wait copies, cuts) is not started: it needs an AArch64 decoder and real NSOs to compare byte for byte with `patch_nso.py`, neither of which exists here yet.
 4. **Host spike:** a prebuilt host that takes its profile at run time; one app, one game process, data in app storage; run a known-good game by hand.
 5. **Shaders:** translator as a child process; shader split in Rust for the first engines; bundle compared with upstream's.
-6. **App shell** (Kotlin) around the core; setup, game list, port with progress.
+6. **App shell** (Kotlin) around the core: written (one screen, foreground service, JNI via `nx-core`/`nx-jni`), not yet built or run.
 7. Upstream contributions for the C changes and for the fixes carried from the proot app (copy split, shaders without reflection).
