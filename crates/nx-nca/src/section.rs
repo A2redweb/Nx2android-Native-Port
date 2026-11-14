@@ -29,6 +29,19 @@ pub struct Section {
     /// the last of six levels; with no hash tree the whole section. Offset from the start of the section.
     pub data_offset: u64,
     pub data_size: u64,
+    /// a patch's BKTR tables (encryption type 4)
+    pub patch: Option<PatchInfo>,
+}
+
+/// Where a patch section keeps its two bucket trees (offsets from the start of the section) and how many entries each holds (section header +0x100 and +0x120).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PatchInfo {
+    pub reloc_offset: u64,
+    pub reloc_size: u64,
+    pub reloc_entries: u32,
+    pub sub_offset: u64,
+    pub sub_size: u64,
+    pub sub_entries: u32,
 }
 
 impl Section {
@@ -113,7 +126,16 @@ pub fn read_full_header<R: Read + Seek>(f: &mut R, at: u64, header_key: &[u8]) -
             3 => (u64le(&h, fh + 8 + 0x10 + 5 * 0x18), u64le(&h, fh + 8 + 0x10 + 5 * 0x18 + 8)), // IVFC level infos at +0x10 of the hash data, 0x18 each
             _ => (0, end - start),
         };
+        let patch = (h[fh + 4] == 4 && &h[fh + 0x110..fh + 0x114] == b"BKTR" && &h[fh + 0x130..fh + 0x134] == b"BKTR").then(|| PatchInfo {
+            reloc_offset: u64le(&h, fh + 0x100),
+            reloc_size: u64le(&h, fh + 0x108),
+            reloc_entries: u32le(&h, fh + 0x118),
+            sub_offset: u64le(&h, fh + 0x120),
+            sub_size: u64le(&h, fh + 0x128),
+            sub_entries: u32le(&h, fh + 0x138),
+        });
         sections.push(Section {
+            patch,
             data_offset,
             data_size,
             index: i,

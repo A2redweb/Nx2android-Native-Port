@@ -129,37 +129,84 @@ pub struct Report {
 
 /// Writes `ExeFS/`, `RomFS/` and `control.nacp` of the base game in `r` under `out`.
 pub fn extract_base<R: Read + Seek>(r: R, keys: &Keys, input: &str, out: &Path) -> Result<Report, Error> {
-    let mut pkg = Package::open(r, keys, input)?;
-    let Some(prog) = pkg.pick(CONTENT_PROGRAM, None).cloned() else { return msg("no Program NCA in the dump") };
-    let mut rep = Report { title_id: prog.header.title_id, ..Report::default() };
+    extract_game(Package::open(r, keys, input)?, None::<Package<R>>, keys, out)
+}
+
+/// The same with an update: its ExeFS is complete and replaces the base's, its RomFS is laid over the base's (BKTR), and its control data is the one used.
+pub fn extract_game<R: Read + Seek, U: Read + Seek>(mut base: Package<R>, mut upd: Option<Package<U>>, keys: &Keys, out: &Path) -> Result<Report, Error> {
+    let Some(bprog) = base.pick(CONTENT_PROGRAM, None).cloned() else { return msg("no Program NCA in the base dump") };
+    let title = bprog.header.title_id;
+    let uprog = match &upd {
+        Some(u) => match u.pick(CONTENT_PROGRAM, Some(title)).cloned() {
+            Some(n) => Some(n),
+            None => return msg(format!("the update has no Program NCA of the base game's program ({title:016x})")),
+        },
+        None => None,
+    };
+    let mut rep = Report { title_id: title, ..Report::default() };
     fs::create_dir_all(out)?;
-    let exefs = prog.header.sections.iter().find(|s| s.fs_type == FS_PFS0).cloned();
-    let romfs = prog.header.sections.iter().find(|s| s.fs_type == FS_ROMFS).cloned();
-    match exefs {
-        Some(s) => rep.exefs_files = nx_fs::extract_pfs0(&mut pkg.data(&prog, &s, keys)?, &out.join("ExeFS"))?,
-        None => return msg("the Program NCA has no ExeFS section"),
-    }
-    fs::create_dir_all(out.join("RomFS"))?; // a program may embed all its assets in its code modules: the layout stays
-    if let Some(s) = romfs {
-        let (n, b) = nx_fs::extract_romfs(&mut pkg.data(&prog, &s, keys)?, &out.join("RomFS"))?;
+    let find = |n: &Nca, fs_type: u8| n.header.sections.iter().find(|s| s.fs_type == fs_type).cloned();
+    // ExeFS
+    rep.exefs_files = match (&mut upd, &uprog) {
+        (Some(u), Some(n)) => match find(n, FS_PFS0) {
+            Some(s) => nx_fs::extract_pfs0(&mut u.data(n, &s, keys)?, &out.join("ExeFS"))?,
+            None => return msg("the update's Program NCA has no ExeFS section"),
+        },
+        _ => match find(&bprog, FS_PFS0) {
+            Some(s) => nx_fs::extract_pfs0(&mut base.data(&bprog, &s, keys)?, &out.join("ExeFS"))?,
+            None => return msg("the Program NCA has no ExeFS section"),
+        },
+    };
+    // RomFS (a program may embed all its assets in its code modules: the folder is made anyway)
+    fs::create_dir_all(out.join("RomFS"))?;
+    let (brom, urom) = (find(&bprog, FS_ROMFS), uprog.as_ref().and_then(|n| find(n, FS_ROMFS)));
+    let dst = out.join("RomFS");
+    let done = match (&mut upd, &uprog, urom, brom) {
+        (Some(u), Some(n), Some(us), Some(bs)) if us.patch.is_some() => {
+            let (bkey, ukey) = (base.key_for(&bprog, keys)?, u.key_for(n, keys)?);
+            let base_sec = SectionReader::new(&mut base.r, bprog.offset, bs, &bkey)?;
+            let patched = nx_nca::bktr::Patched::open(base_sec, &mut u.r, n.offset, &us, &ukey)?;
+            Some(nx_fs::extract_romfs(&mut SubReader::new(patched, us.data_offset, us.data_size), &dst)?)
+        }
+        (Some(_), Some(_), Some(us), None) if us.patch.is_some() => return msg("the update patches a RomFS the base game does not have"),
+        (Some(u), Some(n), Some(us), _) => Some(nx_fs::extract_romfs(&mut u.data(n, &us, keys)?, &dst)?), // a whole RomFS in the update
+        (_, _, None, Some(bs)) | (None, _, _, Some(bs)) => Some(nx_fs::extract_romfs(&mut base.data(&bprog, &bs, keys)?, &dst)?),
+        _ => None,
+    };
+    if let Some((n, b)) = done {
         rep.romfs_files = n;
         rep.romfs_bytes = b;
     }
-    if let Some(ctrl) = pkg.pick(CONTENT_CONTROL, Some(prog.header.title_id)).cloned() {
-        if let Some(s) = ctrl.header.sections.iter().find(|s| s.fs_type == FS_ROMFS).cloned() {
-            let mut d = pkg.data(&ctrl, &s, keys)?;
-            let rom = nx_fs::RomFs::parse(&mut d)?;
-            if let Some(f) = rom.find("control.nacp") {
-                nx_fs::copy_out(&mut d, f.offset, f.size, &out.join("control.nacp"))?;
-                rep.nacp = true;
-            }
-            const LANGS: [&str; 16] = ["AmericanEnglish", "BritishEnglish", "Japanese", "French", "German", "LatinAmericanSpanish", "Spanish", "Italian", "Dutch", "CanadianFrench", "Portuguese", "Russian", "Korean", "TraditionalChinese", "SimplifiedChinese", "BrazilianPortuguese"];
-            if let Some(f) = LANGS.iter().find_map(|l| rom.find(&format!("icon_{l}.dat"))) {
-                nx_fs::copy_out(&mut d, f.offset, f.size, &out.join("icon.jpg"))?;
+    // control data: the update's when there is one
+    let ctrl_from_upd = upd.as_ref().and_then(|u| u.pick(CONTENT_CONTROL, Some(title)).cloned());
+    let (ctrl, use_upd) = match ctrl_from_upd {
+        Some(c) => (Some(c), true),
+        None => (base.pick(CONTENT_CONTROL, Some(title)).cloned(), false),
+    };
+    if let Some(ctrl) = ctrl {
+        if let Some(s) = find(&ctrl, FS_ROMFS) {
+            match (use_upd, &mut upd) {
+                (true, Some(u)) => rep.nacp = control(&mut u.data(&ctrl, &s, keys)?, out)?,
+                _ => rep.nacp = control(&mut base.data(&ctrl, &s, keys)?, out)?,
             }
         }
     }
     Ok(rep)
+}
+
+/// `control.nacp` and the game's icon from a control NCA's RomFS.
+fn control<D: Read + Seek>(d: &mut D, out: &Path) -> Result<bool, Error> {
+    const LANGS: [&str; 16] = ["AmericanEnglish", "BritishEnglish", "Japanese", "French", "German", "LatinAmericanSpanish", "Spanish", "Italian", "Dutch", "CanadianFrench", "Portuguese", "Russian", "Korean", "TraditionalChinese", "SimplifiedChinese", "BrazilianPortuguese"];
+    let rom = nx_fs::RomFs::parse(d)?;
+    let mut got = false;
+    if let Some(f) = rom.find("control.nacp") {
+        nx_fs::copy_out(d, f.offset, f.size, &out.join("control.nacp"))?;
+        got = true;
+    }
+    if let Some(f) = LANGS.iter().find_map(|l| rom.find(&format!("icon_{l}.dat"))) {
+        nx_fs::copy_out(d, f.offset, f.size, &out.join("icon.jpg"))?;
+    }
+    Ok(got)
 }
 
 #[cfg(test)]
@@ -358,6 +405,136 @@ mod tests {
         assert_eq!(fs::read(out.join("RomFS/data.bin")).unwrap().len(), 700);
         assert_eq!(fs::read(out.join("control.nacp")).unwrap(), vec![7; 0x4000]);
         assert_eq!(fs::read(out.join("icon.jpg")).unwrap(), vec![0xFF, 0xD8, 1, 2]);
+        fs::remove_dir_all(&out).unwrap();
+    }
+
+    /// A tree table with one entry set (the offset node's contents are not read).
+    fn bkt(entries: &[Vec<u8>], end: u64) -> Vec<u8> {
+        let node = |es: &[Vec<u8>]| {
+            let mut n = vec![0u8; 0x4000];
+            n[4..8].copy_from_slice(&(es.len() as u32).to_le_bytes());
+            n[8..16].copy_from_slice(&end.to_le_bytes());
+            for (i, e) in es.iter().enumerate() {
+                n[0x10 + i * e.len()..0x10 + (i + 1) * e.len()].copy_from_slice(e);
+            }
+            n
+        };
+        let mut t = node(&[]);
+        t.extend(node(entries));
+        t
+    }
+
+    fn le(parts: &[&[u8]]) -> Vec<u8> {
+        parts.concat()
+    }
+
+    /// An update NCA: section 0 an ExeFS, section 1 a BKTR RomFS whose finished image is `merged_len` bytes: `[0, m)` and `[m + 0x100, ..)` from the base, `[m, m + 0x100)` from `new`.
+    fn update_nca(title: u64, exefs: Vec<u8>, m: u64, merged_len: u64, new: &[u8], key: [u8; 16], rights: [u8; 16]) -> Vec<u8> {
+        let mut h = vec![0u8; 0xC00];
+        h[0x200..0x204].copy_from_slice(b"NCA3");
+        h[0x205] = CONTENT_PROGRAM;
+        h[0x206] = 2;
+        h[0x220] = 2;
+        h[0x210..0x218].copy_from_slice(&title.to_le_bytes());
+        h[0x230..0x240].copy_from_slice(&rights);
+        // section 0: ExeFS, plain CTR
+        let ex_start = 0xC00u64;
+        let mut ex = exefs;
+        ex.resize(ex.len().div_ceil(0x200) * 0x200, 0);
+        let ex_end = ex_start + ex.len() as u64;
+        // section 1: BKTR. physical = 0x200 of new data, relocation table, subsection table
+        let s1 = ex_end;
+        let rt = bkt(&[le(&[&0u64.to_le_bytes(), &0u64.to_le_bytes(), &0u32.to_le_bytes()]), le(&[&m.to_le_bytes(), &0u64.to_le_bytes(), &1u32.to_le_bytes()]), le(&[&(m + 0x100).to_le_bytes(), &(m + 0x100).to_le_bytes(), &0u32.to_le_bytes()])], merged_len);
+        let sub_at = 0x200 + rt.len() as u64;
+        let phys_len = sub_at + 0x8000;
+        let st = bkt(&[le(&[&0u64.to_le_bytes(), &0u32.to_le_bytes(), &7u32.to_le_bytes()]), le(&[&0x200u64.to_le_bytes(), &0u32.to_le_bytes(), &0x55u32.to_le_bytes()])], phys_len);
+        let mut data = new.to_vec();
+        data.resize(0x200, 0);
+        let mut phys = data;
+        phys.extend(&rt);
+        phys.extend(&st);
+        let mut k = key;
+        Aes128::new(&kak()).encrypt_block(&mut k);
+        h[0x320..0x330].copy_from_slice(&k);
+        for (i, (start, end, enc, ctr8)) in [(ex_start, ex_end, 3u8, [1u8; 8]), (s1, s1 + phys_len, 4u8, [2u8; 8])].into_iter().enumerate() {
+            h[0x240 + i * 0x10..0x244 + i * 0x10].copy_from_slice(&((start / 0x200) as u32).to_le_bytes());
+            h[0x244 + i * 0x10..0x248 + i * 0x10].copy_from_slice(&((end / 0x200) as u32).to_le_bytes());
+            let fh = 0x400 + i * 0x200;
+            h[fh + 2] = i as u8 ^ 1; // 1 = PFS0 for section 0, 0 = RomFS for section 1
+            h[fh + 3] = if i == 0 { 1 } else { 3 };
+            h[fh + 4] = enc;
+            h[fh + 0x140..fh + 0x148].copy_from_slice(&ctr8);
+        }
+        let fh = 0x400 + 0x200;
+        h[fh + 8 + 0x10 + 5 * 0x18..fh + 8 + 0x10 + 5 * 0x18 + 8].copy_from_slice(&0u64.to_le_bytes()); // IVFC data level: offset 0
+        h[fh + 8 + 0x10 + 5 * 0x18 + 8..fh + 8 + 0x10 + 5 * 0x18 + 16].copy_from_slice(&merged_len.to_le_bytes());
+        h[fh + 0x100..fh + 0x108].copy_from_slice(&0x200u64.to_le_bytes());
+        h[fh + 0x108..fh + 0x110].copy_from_slice(&(rt.len() as u64).to_le_bytes());
+        h[fh + 0x110..fh + 0x114].copy_from_slice(b"BKTR");
+        h[fh + 0x118..fh + 0x11c].copy_from_slice(&3u32.to_le_bytes());
+        h[fh + 0x120..fh + 0x128].copy_from_slice(&sub_at.to_le_bytes());
+        h[fh + 0x128..fh + 0x130].copy_from_slice(&0x8000u64.to_le_bytes());
+        h[fh + 0x130..fh + 0x134].copy_from_slice(b"BKTR");
+        h[fh + 0x138..fh + 0x13c].copy_from_slice(&2u32.to_le_bytes());
+        let xts = Xts::new(&HK).unwrap();
+        for sct in 0..6 {
+            xts.encrypt(Xts::tweak_be(sct as u128), &mut h[sct * 0x200..(sct + 1) * 0x200]);
+        }
+        let ctr = |ctr8: [u8; 8], counter: Option<u32>, off: u64| {
+            let mut c = [0u8; 16];
+            for (j, b) in ctr8.iter().enumerate() {
+                c[7 - j] = *b;
+            }
+            if let Some(x) = counter {
+                c[4..8].copy_from_slice(&x.to_be_bytes());
+            }
+            c[8..].copy_from_slice(&(off >> 4).to_be_bytes());
+            c
+        };
+        let aes = Aes128::new(&key);
+        aes.ctr_apply(ctr([1; 8], None, ex_start), &mut ex);
+        aes.ctr_apply(ctr([2; 8], Some(7), s1), &mut phys[..0x200]);
+        aes.ctr_apply(ctr([2; 8], None, s1 + 0x200), &mut phys[0x200..]);
+        h.extend(ex);
+        h.extend(phys);
+        h
+    }
+
+    #[test]
+    fn extracts_a_game_with_an_update_layered_over_the_base() {
+        let rights = {
+            let mut r = [0u8; 16];
+            r[..8].copy_from_slice(&TITLE.to_be_bytes());
+            r[15] = 2;
+            r
+        };
+        let big: Vec<u8> = (0..700u32).map(|i| i as u8).collect();
+        let base_rom = romfs(&[("a.txt", b"hello".to_vec()), ("data.bin", big.clone())]);
+        let base_nsp = pfs0(&[("p.nca", nca(CONTENT_PROGRAM, TITLE, &[(FS_PFS0, pfs0(&[("main", vec![1; 10])])), (FS_ROMFS, base_rom.clone())], [0x77; 16], [0; 16]))]);
+        // the update changes 0x100 bytes inside data.bin and brings a new ExeFS and a new control NACP
+        let m = 0x120u64;
+        assert!((m as usize + 0x100) < base_rom.len());
+        let new = vec![0xAB; 0x100];
+        let mut merged = base_rom.clone();
+        merged[m as usize..m as usize + 0x100].copy_from_slice(&new);
+        let upd_prog = update_nca(TITLE, pfs0(&[("main", vec![2; 20])]), m, base_rom.len() as u64, &new, [0x66; 16], [0; 16]);
+        let ctrl = nca(CONTENT_CONTROL, TITLE, &[(FS_ROMFS, romfs(&[("control.nacp", vec![3; 0x4000])]))], [0x99; 16], rights);
+        let upd_nsp = pfs0(&[("up.nca", upd_prog), ("uc.nca", ctrl), ("t.tik", tik(rights, [0x99; 16]))]);
+
+        let out = std::env::temp_dir().join(format!("nx-extract-test3-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&out);
+        let base = Package::open(Cursor::new(base_nsp), &keys(), "base.nsp").unwrap();
+        let upd = Package::open(Cursor::new(upd_nsp), &keys(), "upd.nsp").unwrap();
+        let rep = extract_game(base, Some(upd), &keys(), &out).unwrap();
+        assert_eq!((rep.exefs_files, rep.romfs_files, rep.nacp), (1, 2, true));
+        assert_eq!(fs::read(out.join("ExeFS/main")).unwrap(), vec![2; 20]); // the update's code, not the base's
+        assert_eq!(fs::read(out.join("control.nacp")).unwrap(), vec![3; 0x4000]);
+        // the changed bytes sit in data.bin: compare against the merged image's own parse
+        let want = nx_fs::RomFs::parse(&mut Cursor::new(&merged)).unwrap();
+        let f = want.find("data.bin").unwrap();
+        assert_eq!(fs::read(out.join("RomFS/data.bin")).unwrap(), &merged[f.offset as usize..(f.offset + f.size) as usize]);
+        assert_ne!(fs::read(out.join("RomFS/data.bin")).unwrap(), big);
+        assert_eq!(fs::read(out.join("RomFS/a.txt")).unwrap(), b"hello");
         fs::remove_dir_all(&out).unwrap();
     }
 
