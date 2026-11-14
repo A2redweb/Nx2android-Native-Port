@@ -15,9 +15,11 @@ Early. Done and tested on a PC:
 | `nx-keys` | `prod.keys`, key values never printed | Unit tests |
 | `nx-crypto` | AES-128 (ECB, CTR) and AES-XTS with Nintendo's big-endian tweak, std only | FIPS-197, NIST SP 800-38A, IEEE 1619 vectors |
 | `nx-nca` | NCA header decrypt, title ID of a dump (ticket, meta NCA, file name), key area keys, CTR section reader | Synthetic images; not yet against a real dump |
+| `nx-fs` | RomFS reader, PFS0 and RomFS extraction, safe path joining | Synthetic images |
+| `nx-extract` | Base game from an NSP/XCI: ExeFS, RomFS, control.nacp (tickets, key area and title keys) | End-to-end on a synthetic NSP; not a real dump |
 | `nxn` | Command line for the above | |
 
-Not started: extraction beyond headers (section crypto, update layering, RomFS/ExeFS), the code rewriter, shaders, the Android app. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the stage-by-stage plan, what is measured and what is a proposal.
+Not done: update layering (BKTR), NSZ/XCZ decompression, section hash checks, DLC, the code rewriter, shaders, the Android app. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the stage-by-stage plan, what is measured and what is a proposal.
 
 ```
 cargo test
@@ -25,6 +27,7 @@ cargo run -p nxn -- games <upstream>/nxnative/dm/games --all --overlay <upstream
 cargo run -p nxn -- dump game.nsp
 cargo run -p nxn -- keys prod.keys
 cargo run -p nxn -- title game.nsp prod.keys
+cargo run -p nxn -- extract prod.keys game.nsp out/
 ```
 
 ## Docs

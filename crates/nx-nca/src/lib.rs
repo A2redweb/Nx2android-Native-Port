@@ -5,6 +5,7 @@
 //! an update's program and control NCAs carry the base game's title ID. An NSZ keeps its NCA's header as it is.
 
 pub mod section;
+pub mod ticket;
 
 use nx_container::{dump_files, Entry};
 use nx_crypto::Xts;

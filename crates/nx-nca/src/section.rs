@@ -25,6 +25,10 @@ pub struct Section {
     pub encryption: u8,
     /// the 8 bytes at +0x140 of the section header
     pub counter: [u8; 8],
+    /// where the file system itself sits inside the section, past the hash tables: for a hash tree of type 2 (SHA-256, ExeFS) the second layer region, for type 3 (IVFC, RomFS)
+    /// the last of six levels; with no hash tree the whole section. Offset from the start of the section.
+    pub data_offset: u64,
+    pub data_size: u64,
 }
 
 impl Section {
@@ -103,12 +107,20 @@ pub fn read_full_header<R: Read + Seek>(f: &mut R, at: u64, header_key: &[u8]) -
             continue;
         }
         let fh = 0x400 + i * 0x200;
+        let hash_type = h[fh + 3];
+        let (data_offset, data_size) = match hash_type {
+            2 if u32le(&h, fh + 0x2c) >= 2 => (u64le(&h, fh + 0x40), u64le(&h, fh + 0x48)), // hash data at +8: master hash 0x20, block size, layer count (+0x2c), regions from +0x30; the data is region 1
+            3 => (u64le(&h, fh + 8 + 0x10 + 5 * 0x18), u64le(&h, fh + 8 + 0x10 + 5 * 0x18 + 8)), // IVFC level infos at +0x10 of the hash data, 0x18 each
+            _ => (0, end - start),
+        };
         sections.push(Section {
+            data_offset,
+            data_size,
             index: i,
             start,
             end,
             fs_type: h[fh + 2],
-            hash_type: h[fh + 3],
+            hash_type,
             encryption: h[fh + 4],
             counter: h[fh + 0x140..fh + 0x148].try_into().unwrap(),
         });
