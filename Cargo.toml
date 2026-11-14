@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/nx-profile", "crates/nx-container", "crates/nx-keys", "crates/nxn"]
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0-only"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
