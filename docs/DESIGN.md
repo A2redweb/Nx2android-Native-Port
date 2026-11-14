@@ -2,11 +2,9 @@
 
 Goal: the porter's whole pipeline (extract, shader split and translate, build host, package, install) runs on the phone with one-tap setup.
 
-## Decision (2026-11-13): runtime stays Ubuntu + proot
+## Decision (2026-11-14): native app, Rust core
 
-Chosen by the project owner: reuse the proven stack (Ubuntu under proot, the predecessor's ready-made glibc .NET tools) and build the one-tap setup, the full game list and adb pairing on top. The no-proot runtime (questions 1-4 below) stays a later option; `docs/SPIKE_DOTNET.md` and `tools/make_bionic_tools.sh` keep the first step of it. Costs accepted for now: old target API (no Google Play), proot speed, Android 14 developer settings for long builds.
-
-Facts below come from the predecessor project's handover; options are suggestions to verify, not findings.
+The project owner chose a native Android app with a Rust core: no WebView, no proot, no Python. This supersedes the 2026-11-13 note that kept Ubuntu and proot, which was a misreading of the request; the proot app's GUI was dropped from this repository. The plan is in [ARCHITECTURE.md](ARCHITECTURE.md); the questions below are still the right ones, and ARCHITECTURE.md gives the current answers or marks them as proposals.
 
 ## Open questions
 
