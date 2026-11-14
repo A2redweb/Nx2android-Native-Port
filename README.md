@@ -19,12 +19,12 @@ Early. Done and tested on a PC:
 | `nx-nsz` | NSZ/XCZ to NSP (NCZ sections re-encrypted, name hash checked) | Synthetic NCZ files incl. a libzstd stream; no real NSZ yet |
 | `nx-nso` | NSO/NRO header, LZ4, memory image, segment hashes, build ID | Hand-made vectors and round trips; no real module yet |
 | `nx-fs` | RomFS reader, PFS0 and RomFS extraction, safe path joining | Synthetic images |
-| `nx-extract` | Game from an NSP/XCI, with an update layered over it (BKTR): ExeFS, RomFS, control.nacp (tickets, key area and title keys) | End-to-end on a synthetic NSP; not a real dump |
+| `nx-extract` | Game from an NSP/XCI/NSZ/XCZ, with an update layered over it (BKTR) and add-on content: ExeFS, RomFS, control.nacp, icon, game name and version (tickets, key area and title keys; inflater for compressed NACPs) | End-to-end on a synthetic NSP; not a real dump |
 | `nx-core` | What the app calls: games list, keys check, extraction jobs polled as JSON | Unit tests (errors, junk dump, JSON) |
 | `nx-jni` | `libnxcore.so`: five JNI functions, strings and ints only | Symbols checked with `nm`; never loaded on a device |
 | `nxn` | Command line for the above | |
 
-Not done: section hash checks, DLC, the NSO rewriter, shaders, the host build and the packaging of a runnable game.
+Not done: section hash checks (a cut-short dump is still caught as a read error), system data (`--sysdata`), the NSO rewriter, shaders, the host build and the packaging of a runnable game.
 
 ## The app (android/)
 
@@ -39,6 +39,7 @@ cargo run -p nxn -- keys prod.keys
 cargo run -p nxn -- title game.nsp prod.keys
 cargo run -p nxn -- extract prod.keys game.nsp out/ --update update.nsp   # .nsz / .xcz work too
 cargo run -p nxn -- decompress game.nsz game.nsp
+cargo run -p nxn -- aoc prod.keys dlc.nsp out/aoc
 ```
 
 ## Docs

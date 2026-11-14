@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 fn usage() -> ExitCode {
-    eprintln!("usage:\n  nxn games <profiles dir> [--all] [--json] [--overlay <overlay_default.tsv>]\n  nxn dump <file>\n  nxn keys <prod.keys>\n  nxn title <file> [<prod.keys>]\n  nxn extract <prod.keys> <dump> <out dir> [--update <update dump>]\n  nxn decompress <dump.nsz|xcz> <out.nsp>\n  nxn nso <module>");
+    eprintln!("usage:\n  nxn games <profiles dir> [--all] [--json] [--overlay <overlay_default.tsv>]\n  nxn dump <file>\n  nxn keys <prod.keys>\n  nxn title <file> [<prod.keys>]\n  nxn extract <prod.keys> <dump> <out dir> [--update <update dump>]\n  nxn decompress <dump.nsz|xcz> <out.nsp>\n  nxn nso <module>\n  nxn aoc <prod.keys> <dlc dump> <out dir>");
     ExitCode::from(2)
 }
 
@@ -110,7 +110,7 @@ fn extract(args: &[String]) -> Result<(), String> {
     let r = nx_extract::extract_game(bp, upd_pkg, &keys, Path::new(out)).map_err(|e| e.to_string());
     let _ = std::fs::remove_dir_all(&tmp); // the decompressed copies, if any
     let r = r?;
-    println!("title {:016x}: ExeFS {} files, RomFS {} files ({:.1} MB), control.nacp {}", r.title_id, r.exefs_files, r.romfs_files, r.romfs_bytes as f64 / 1048576.0, if r.nacp { "written" } else { "not found" });
+    println!("title {:016x} {} {}: ExeFS {} files, RomFS {} files ({:.1} MB), control.nacp {}", r.title_id, r.name, r.display_version, r.exefs_files, r.romfs_files, r.romfs_bytes as f64 / 1048576.0, if r.nacp { "written" } else { "not found" });
     Ok(())
 }
 
@@ -133,6 +133,18 @@ fn nso(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn aoc(args: &[String]) -> Result<(), String> {
+    let [keys, dump, out] = args else { return Err("aoc needs <prod.keys> <dlc dump> <out dir>".into()) };
+    let keys = nx_keys::Keys::load(Path::new(keys)).map_err(|e| format!("{keys}: {e}"))?;
+    let tmp = Path::new(out).join(".tmp");
+    let pkg = nx_extract::open_path(Path::new(dump), dump, &keys, &tmp, &mut |_| {}).map_err(|e| e.to_string())?;
+    let r = nx_extract::extract_aoc(pkg.package, &keys, Path::new(out)).map_err(|e| e.to_string());
+    let _ = std::fs::remove_dir_all(&tmp);
+    let (id, n) = r?;
+    println!("add-on content {id:016x}: {n} files");
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let r = match args.first().map(String::as_str) {
@@ -143,6 +155,7 @@ fn main() -> ExitCode {
         Some("extract") => extract(&args[1..]),
         Some("decompress") => decompress(&args[1..]),
         Some("nso") => nso(&args[1..]),
+        Some("aoc") => aoc(&args[1..]),
         _ => return usage(),
     };
     match r {
