@@ -14,7 +14,7 @@ Early. Done and tested on a PC:
 | `nx-container` | Files inside an NSP / NSZ / XCI / XCZ | Synthetic images (a real dump is not available here) |
 | `nx-keys` | `prod.keys`, key values never printed | Unit tests |
 | `nx-crypto` | AES-128 (ECB, CTR) and AES-XTS with Nintendo's big-endian tweak, std only | FIPS-197, NIST SP 800-38A, IEEE 1619 vectors |
-| `nx-nca` | NCA header decrypt, title ID of a dump (ticket, meta NCA, file name) | Synthetic images; not yet against a real dump |
+| `nx-nca` | NCA header decrypt, title ID of a dump (ticket, meta NCA, file name), key area keys, CTR section reader | Synthetic images; not yet against a real dump |
 | `nxn` | Command line for the above | |
 
 Not started: extraction beyond headers (section crypto, update layering, RomFS/ExeFS), the code rewriter, shaders, the Android app. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the stage-by-stage plan, what is measured and what is a proposal.
