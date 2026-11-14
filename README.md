@@ -13,15 +13,18 @@ Early. Done and tested on a PC:
 | `nx-profile` | Game and Android profiles, the games list | Upstream's own `porter profiles --all --json`: identical for all 87 games |
 | `nx-container` | Files inside an NSP / NSZ / XCI / XCZ | Synthetic images (a real dump is not available here) |
 | `nx-keys` | `prod.keys`, key values never printed | Unit tests |
+| `nx-crypto` | AES-128 (ECB, CTR) and AES-XTS with Nintendo's big-endian tweak, std only | FIPS-197, NIST SP 800-38A, IEEE 1619 vectors |
+| `nx-nca` | NCA header decrypt, title ID of a dump (ticket, meta NCA, file name) | Synthetic images; not yet against a real dump |
 | `nxn` | Command line for the above | |
 
-Not started: extraction (NCA), the code rewriter, shaders, the Android app. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the stage-by-stage plan, what is measured and what is a proposal.
+Not started: extraction beyond headers (section crypto, update layering, RomFS/ExeFS), the code rewriter, shaders, the Android app. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the stage-by-stage plan, what is measured and what is a proposal.
 
 ```
 cargo test
 cargo run -p nxn -- games <upstream>/nxnative/dm/games --all --overlay <upstream>/nxnative/dm/android/overlay_default.tsv
 cargo run -p nxn -- dump game.nsp
 cargo run -p nxn -- keys prod.keys
+cargo run -p nxn -- title game.nsp prod.keys
 ```
 
 ## Docs
@@ -34,4 +37,4 @@ cargo run -p nxn -- keys prod.keys
 
 ## Test device
 
-Poco X6, Adreno 710, Turnip driver, Android 14.
+Poco X6, Adreno 710, Turnip driver, Android 16.

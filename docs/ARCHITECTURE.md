@@ -57,7 +57,7 @@ A command-line face of the core (`nxn`) runs on a PC or in Termux, so each Rust 
 
 ## What was checked in this session
 
-- `cargo test` passes for the three crates (14 tests, including synthetic NSP and XCI images and corrupt headers).
+- `cargo test` passes for all crates (about 30 tests, including synthetic NSP and XCI images, corrupt headers, AES/XTS standard vectors and NCA headers).
 - `nxn games` on upstream's `nxnative/dm/games`: output identical to `python -m porter profiles --all --json` for all 87 games, and the 55 `android.tsv` files all validate under the same rules.
 - Not checked: any Android build. This environment has no Android Rust target, no NDK and no network access to crates.io, so the crates are dependency-free for now. Crypto, zstd, LZ4 and signing crates will be added on a machine with crates access.
 
