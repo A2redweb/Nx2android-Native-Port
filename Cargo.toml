@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/nx-profile", "crates/nx-container", "crates/nx-keys", "crates/nx-crypto", "crates/nx-nca", "crates/nx-fs", "crates/nxn", "crates/nx-extract"]
+members = ["crates/nx-profile", "crates/nx-container", "crates/nx-keys", "crates/nx-crypto", "crates/nx-nca", "crates/nx-fs", "crates/nxn", "crates/nx-extract", "crates/nx-zstd", "crates/nx-nsz"]
 
 [workspace.package]
 edition = "2021"

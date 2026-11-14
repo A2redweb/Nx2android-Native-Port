@@ -13,8 +13,8 @@ Measured by reading `porter/pipeline.py`, `nxnative/scripts/build_ipa_from_nsp.p
 | Read the dump (NSP/NSZ/XCI/XCZ container) | Python (`dump_files`) | ~20 lines | no | **Done**: `nx-container` |
 | Keys (`prod.keys`) | Python | small | no | **Done**: `nx-keys` |
 | Game list, profiles, advice | Python (`game.py`, `android_profile.py`, `porter/profiles.py`) | ~400 lines | data | **Done**: `nx-profile`, output identical to upstream for all 87 games |
-| Extract (NCAs, update layered over base, RomFS, ExeFS, DLC) | C# `nx_extract` on LibHac | 290 lines on top of LibHac | no | Rust: NCA headers (AES-XTS), section crypto (AES-CTR), patch layering (BKTR), RomFS and ExeFS readers. The largest Rust piece after the translator |
-| NSZ/XCZ decompression | Python (zstd, AES-CTR) | ~190 lines (`porter/dumps.py`) | no | Rust with a zstd and an AES crate |
+| Extract (NCAs, update layered over base, RomFS, ExeFS, DLC) | C# `nx_extract` on LibHac | 290 lines on top of LibHac | no | **Mostly done** (`nx-nca`, `nx-fs`, `nx-extract`): headers, key area and title keys, CTR sections, BKTR layering, RomFS and ExeFS, NACP and icon. Verified on synthetic images only. Missing: hash checks of section data (damaged-dump detection), DLC (`--aoc`), system data (`--sysdata`), compressed NACP names |
+| NSZ/XCZ decompression | Python (zstd, AES-CTR) | ~190 lines (`porter/dumps.py`) | no | **Done**: `nx-zstd` (own decoder, no crates) and `nx-nsz`, tested on synthetic NCZ files and libzstd output. The decoder runs 120-400 MB/s on the dev machine; a phone will be slower |
 | Rewrite the game's code (NSO modules) | Python `patch_nso.py` + capstone | 1,175 + 123 + 207 lines | yes, by build ID | Rust: AArch64 decode and rewrite. The per-game patch files are data tables (`CUTS`, `OBS`, `FRAME_STEP`; 6 `def`s in all 25 files), so they convert to plain data |
 | Shader split (find every shader in the game's files) | Python `shader_split.py` | 1,697 lines, a reader per engine (Unity, Unreal paks, KTGL, Oodle archives...) | yes | Rust, reader by reader, starting with the games that matter most |
 | Shader translation (Maxwell to SPIR-V) | C# `dmsh_xlate` over Ryujinx's translator | 280 lines + Ryujinx.Graphics.Shader 41,856, Spv.Generator 9,413, Ryujinx.Common 13,114 | yes | **Not rewritten at first**: ship the C# as a NativeAOT binary built for Android (see `SPIKE_DOTNET.md`) and drive it from Rust. A Rust port is a separate, large project |
@@ -57,7 +57,7 @@ A command-line face of the core (`nxn`) runs on a PC or in Termux, so each Rust 
 
 ## What was checked in this session
 
-- `cargo test` passes for all crates (about 30 tests, including synthetic NSP and XCI images, corrupt headers, AES/XTS standard vectors and NCA headers).
+- `cargo test` passes for all crates (about 60 tests: container images, corrupt headers, AES/XTS/SHA-256 standard vectors, NCA headers, key derivation, BKTR layering, libzstd vectors, synthetic NCZ files and end-to-end extraction with an update).
 - `nxn games` on upstream's `nxnative/dm/games`: output identical to `python -m porter profiles --all --json` for all 87 games, and the 55 `android.tsv` files all validate under the same rules.
 - Not checked: any Android build. This environment has no Android Rust target, no NDK and no network access to crates.io, so the crates are dependency-free for now. Crypto, zstd, LZ4 and signing crates will be added on a machine with crates access.
 

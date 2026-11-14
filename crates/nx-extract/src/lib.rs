@@ -110,6 +110,46 @@ impl<R: Read + Seek> Package<R> {
     }
 }
 
+/// A dump from a path: an NSP or XCI as it is, an NSZ or XCZ decompressed first into `tmp` (a file `<name>.nsp`, removed by `Opened::finish`).
+pub struct Opened {
+    pub package: Package<std::io::BufReader<fs::File>>,
+    temp: Option<std::path::PathBuf>,
+}
+
+impl Opened {
+    /// Deletes the decompressed copy, if one was made.
+    pub fn finish(self) {
+        drop(self.package);
+        if let Some(t) = self.temp {
+            let _ = fs::remove_file(t);
+        }
+    }
+}
+
+pub fn open_path(path: &Path, keys: &Keys, tmp: &Path, progress: &mut dyn FnMut(u64)) -> Result<Opened, Error> {
+    let shown = path.display().to_string();
+    let f = fs::File::open(path).map_err(|e| Error::Msg(format!("{shown}: {e}")))?;
+    if !nx_nsz::is_compressed(path) {
+        return Ok(Opened { package: Package::open(std::io::BufReader::new(f), keys, &shown)?, temp: None });
+    }
+    fs::create_dir_all(tmp)?;
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "dump".into());
+    let dst = tmp.join(format!("{stem}.nsp"));
+    let partial = tmp.join(format!("{stem}.nsp.partial"));
+    let res = (|| -> io::Result<()> {
+        let mut out = io::BufWriter::new(fs::File::create(&partial)?);
+        nx_nsz::decompress(&mut std::io::BufReader::new(f), &mut out, &shown, progress)?;
+        out.into_inner().map_err(|e| e.into_error())?;
+        fs::rename(&partial, &dst)
+    })();
+    if let Err(e) = res {
+        let _ = fs::remove_file(&partial);
+        return Err(Error::Io(e));
+    }
+    let g = fs::File::open(&dst)?;
+    Ok(Opened { package: Package::open(std::io::BufReader::new(g), keys, &shown)?, temp: Some(dst) })
+}
+
 /// `fs_type` of a section header: RomFS.
 pub const FS_ROMFS: u8 = 0;
 /// `fs_type` of a section header: PFS0 (ExeFS, logo).
