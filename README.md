@@ -17,6 +17,7 @@ Early. Done and tested on a PC:
 | `nx-nca` | NCA header decrypt, title ID of a dump (ticket, meta NCA, file name), key area keys, CTR section reader | Synthetic images; not yet against a real dump |
 | `nx-zstd` | Zstandard decoder in plain Rust (no dictionaries) | libzstd output at levels 1-19, 4 kinds of data, corrupt inputs; 120-400 MB/s on the dev machine |
 | `nx-nsz` | NSZ/XCZ to NSP (NCZ sections re-encrypted, name hash checked) | Synthetic NCZ files incl. a libzstd stream; no real NSZ yet |
+| `nx-nso` | NSO/NRO header, LZ4, memory image, segment hashes, build ID | Hand-made vectors and round trips; no real module yet |
 | `nx-fs` | RomFS reader, PFS0 and RomFS extraction, safe path joining | Synthetic images |
 | `nx-extract` | Game from an NSP/XCI, with an update layered over it (BKTR): ExeFS, RomFS, control.nacp (tickets, key area and title keys) | End-to-end on a synthetic NSP; not a real dump |
 | `nxn` | Command line for the above | |

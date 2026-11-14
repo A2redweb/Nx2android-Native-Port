@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 fn usage() -> ExitCode {
-    eprintln!("usage:\n  nxn games <profiles dir> [--all] [--json] [--overlay <overlay_default.tsv>]\n  nxn dump <file>\n  nxn keys <prod.keys>\n  nxn title <file> [<prod.keys>]\n  nxn extract <prod.keys> <dump> <out dir> [--update <update dump>]\n  nxn decompress <dump.nsz|xcz> <out.nsp>");
+    eprintln!("usage:\n  nxn games <profiles dir> [--all] [--json] [--overlay <overlay_default.tsv>]\n  nxn dump <file>\n  nxn keys <prod.keys>\n  nxn title <file> [<prod.keys>]\n  nxn extract <prod.keys> <dump> <out dir> [--update <update dump>]\n  nxn decompress <dump.nsz|xcz> <out.nsp>\n  nxn nso <module>");
     ExitCode::from(2)
 }
 
@@ -124,6 +124,15 @@ fn decompress(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn nso(args: &[String]) -> Result<(), String> {
+    let Some(p) = args.first() else { return Err("nso needs a module file".into()) };
+    let d = std::fs::read(p).map_err(|e| format!("{p}: {e}"))?;
+    let n = nx_nso::Nso::parse(&d).map_err(|e| format!("{p}: {e}"))?;
+    let img = n.image(&d).map_err(|e| format!("{p}: {e}"))?;
+    println!("{} build id {} image {} bytes, bss {}", if n.is_nro { "NRO" } else { "NSO" }, n.build_id_hex(), img.len(), n.bss);
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let r = match args.first().map(String::as_str) {
@@ -133,6 +142,7 @@ fn main() -> ExitCode {
         Some("title") => title(&args[1..]),
         Some("extract") => extract(&args[1..]),
         Some("decompress") => decompress(&args[1..]),
+        Some("nso") => nso(&args[1..]),
         _ => return usage(),
     };
     match r {

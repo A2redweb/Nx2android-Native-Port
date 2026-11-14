@@ -43,6 +43,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nx-nso"
+version = "0.1.0"
+dependencies = [
+ "nx-crypto",
+]
+
+[[package]]
 name = "nx-nsz"
 version = "0.1.0"
 dependencies = [
@@ -67,6 +74,7 @@ dependencies = [
  "nx-extract",
  "nx-keys",
  "nx-nca",
+ "nx-nso",
  "nx-nsz",
  "nx-profile",
 ]
