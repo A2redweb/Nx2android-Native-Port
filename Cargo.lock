@@ -7,6 +7,15 @@ name = "nx-container"
 version = "0.1.0"
 
 [[package]]
+name = "nx-core"
+version = "0.1.0"
+dependencies = [
+ "nx-extract",
+ "nx-keys",
+ "nx-profile",
+]
+
+[[package]]
 name = "nx-crypto"
 version = "0.1.0"
 
@@ -27,6 +36,13 @@ name = "nx-fs"
 version = "0.1.0"
 dependencies = [
  "nx-container",
+]
+
+[[package]]
+name = "nx-jni"
+version = "0.1.0"
+dependencies = [
+ "nx-core",
 ]
 
 [[package]]
