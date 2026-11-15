@@ -34,6 +34,7 @@ OPTIONAL = {'DM_GAME_SHARED_FONT_TTF': '-1', 'DM_GAME_NVN_API_MAJOR': '-1', 'DM_
 names = sorted(({k for d in per for k in d} | set(OPTIONAL)) - ARRAYS)
 def ctype(name):
     vals = [d[name] for d in per if name in d]
+    if not vals: return 'int'   # a field no profile sets (an optional one)
     if all(v.startswith('"') for v in vals): return 'const char *'
     if any(v.endswith('ull') for v in vals): return 'unsigned long long'
     return 'int'
