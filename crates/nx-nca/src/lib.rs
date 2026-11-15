@@ -5,6 +5,7 @@
 //! an update's program and control NCAs carry the base game's title ID. An NSZ keeps its NCA's header as it is.
 
 pub mod bktr;
+pub mod hash;
 pub mod section;
 pub mod ticket;
 

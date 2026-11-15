@@ -329,6 +329,7 @@ mod tests {
             counter: RAW,
             data_offset: 0,
             data_size: 0xC00,
+            hash: crate::section::HashInfo::None,
             patch: Some(PatchInfo { reloc_offset: reloc_off, reloc_size: rt.len() as u64, reloc_entries: 3, sub_offset: sub_off, sub_size: st.len() as u64, sub_entries: 3 }),
         };
         // `ctr(Some(..), ..)` above uses NCA-relative offsets, as the reader does
@@ -351,7 +352,7 @@ mod tests {
 
     #[test]
     fn a_section_without_tables_is_refused() {
-        let sec = Section { index: 0, start: 0, end: 0x200, fs_type: 0, hash_type: 1, encryption: 3, counter: [0; 8], data_offset: 0, data_size: 0x200, patch: None };
+        let sec = Section { index: 0, start: 0, end: 0x200, fs_type: 0, hash_type: 1, encryption: 3, counter: [0; 8], data_offset: 0, data_size: 0x200, patch: None, hash: crate::section::HashInfo::None };
         assert!(Patched::open(Cursor::new(vec![]), Cursor::new(vec![0u8; 0x300]), 0, &sec, &KEY).is_err());
     }
 }

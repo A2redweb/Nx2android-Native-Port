@@ -14,7 +14,7 @@ Early. Done and tested on a PC:
 | `nx-container` | Files inside an NSP / NSZ / XCI / XCZ | Synthetic images (a real dump is not available here) |
 | `nx-keys` | `prod.keys`, key values never printed | Unit tests |
 | `nx-crypto` | AES-128 (ECB, CTR), AES-XTS with Nintendo's big-endian tweak, SHA-256, std only | FIPS-197, SP 800-38A, IEEE 1619, FIPS 180 vectors |
-| `nx-nca` | NCA header decrypt, title ID of a dump (ticket, meta NCA, file name), key area keys, CTR section reader | Synthetic images; not yet against a real dump |
+| `nx-nca` | NCA headers, title ID, key derivation, CTR sections, BKTR layering, hash-tree verification | Key derivation and header_key checked against a real `prod.keys` (17/17 master keys, 22/22 titlekeks, 66/66 key area keys); the rest on synthetic images only |
 | `nx-zstd` | Zstandard decoder in plain Rust (no dictionaries) | libzstd output at levels 1-19, 4 kinds of data, corrupt inputs; 120-400 MB/s on the dev machine |
 | `nx-nsz` | NSZ/XCZ to NSP (NCZ sections re-encrypted, name hash checked) | Synthetic NCZ files incl. a libzstd stream; no real NSZ yet |
 | `nx-nso` | NSO/NRO header, LZ4, memory image, segment hashes, build ID | Hand-made vectors and round trips; no real module yet |
@@ -24,7 +24,7 @@ Early. Done and tested on a PC:
 | `nx-jni` | `libnxcore.so`: five JNI functions, strings and ints only | Symbols checked with `nm`; never loaded on a device |
 | `nxn` | Command line for the above | |
 
-Not done: section hash checks (a cut-short dump is still caught as a read error), system data (`--sysdata`), the NSO rewriter, shaders, the host build and the packaging of a runnable game.
+Not done: hash checks of patch (update) sections, system data (`--sysdata`), the NSO rewriter, shaders, the host build and the packaging of a runnable game.
 
 ## The app (android/)
 
@@ -40,6 +40,7 @@ cargo run -p nxn -- title game.nsp prod.keys
 cargo run -p nxn -- extract prod.keys game.nsp out/ --update update.nsp   # .nsz / .xcz work too
 cargo run -p nxn -- decompress game.nsz game.nsp
 cargo run -p nxn -- aoc prod.keys dlc.nsp out/aoc
+cargo run -p nxn -- verify prod.keys game.nsp        # hash trees: finds damaged files
 ```
 
 ## Docs

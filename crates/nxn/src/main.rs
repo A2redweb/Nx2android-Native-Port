@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 fn usage() -> ExitCode {
-    eprintln!("usage:\n  nxn games <profiles dir> [--all] [--json] [--overlay <overlay_default.tsv>]\n  nxn dump <file>\n  nxn keys <prod.keys>\n  nxn title <file> [<prod.keys>]\n  nxn extract <prod.keys> <dump> <out dir> [--update <update dump>]\n  nxn decompress <dump.nsz|xcz> <out.nsp>\n  nxn nso <module>\n  nxn aoc <prod.keys> <dlc dump> <out dir>");
+    eprintln!("usage:\n  nxn games <profiles dir> [--all] [--json] [--overlay <overlay_default.tsv>]\n  nxn dump <file>\n  nxn keys <prod.keys>\n  nxn title <file> [<prod.keys>]\n  nxn extract <prod.keys> <dump> <out dir> [--update <update dump>]\n  nxn decompress <dump.nsz|xcz> <out.nsp>\n  nxn nso <module>\n  nxn aoc <prod.keys> <dlc dump> <out dir>\n  nxn verify <prod.keys> <dump>");
     ExitCode::from(2)
 }
 
@@ -145,6 +145,30 @@ fn aoc(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn verify(args: &[String]) -> Result<(), String> {
+    let [keys, dump] = args else { return Err("verify needs <prod.keys> <dump>".into()) };
+    let keys = nx_keys::Keys::load(Path::new(keys)).map_err(|e| format!("{keys}: {e}"))?;
+    let tmp = std::env::temp_dir().join(format!("nxn-verify-{}", std::process::id()));
+    let mut done = 0u64;
+    let mut o = nx_extract::open_path(Path::new(dump), dump, &keys, &tmp, &mut |_| {}).map_err(|e| e.to_string())?;
+    let damage = nx_extract::verify(&mut o.package, &keys, &mut |n| done += n).map_err(|e| e.to_string());
+    drop(o);
+    let _ = std::fs::remove_dir_all(&tmp);
+    let damage = damage?;
+    println!("checked {:.1} MB of section data", done as f64 / 1048576.0);
+    if damage.is_empty() {
+        println!("no damage found");
+        return Ok(());
+    }
+    for d in &damage {
+        println!("{} section {}: {} damaged block(s){}", d.nca, d.section, d.bad_blocks, if d.upper_damaged { ", hash tables damaged too" } else { "" });
+        for f in d.files.iter().take(20) {
+            println!("  {f}");
+        }
+    }
+    Err(format!("{dump}: damaged (see above); dump it again"))
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let r = match args.first().map(String::as_str) {
@@ -156,6 +180,7 @@ fn main() -> ExitCode {
         Some("decompress") => decompress(&args[1..]),
         Some("nso") => nso(&args[1..]),
         Some("aoc") => aoc(&args[1..]),
+        Some("verify") => verify(&args[1..]),
         _ => return usage(),
     };
     match r {

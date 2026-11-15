@@ -245,6 +245,51 @@ pub fn extract_game<R: Read + Seek, U: Read + Seek>(mut base: Package<R>, mut up
     Ok(rep)
 }
 
+/// A section whose data does not match its hash tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Damage {
+    pub nca: String,
+    pub section: usize,
+    pub bad_blocks: usize,
+    /// files that overlap a damaged block (empty when the file system could not be read)
+    pub files: Vec<String>,
+    /// the hash levels above the data are inconsistent too
+    pub upper_damaged: bool,
+}
+
+/// Checks every section with a hash tree in the dump (not a patch section, which needs the base: its check is skipped). Reads and decrypts all data once.
+pub fn verify<R: Read + Seek>(pkg: &mut Package<R>, keys: &Keys, progress: &mut dyn FnMut(u64)) -> Result<Vec<Damage>, Error> {
+    let mut out = Vec::new();
+    let ncas = pkg.ncas.clone();
+    for n in &ncas {
+        for s in &n.header.sections {
+            if s.patch.is_some() || s.encryption == 2 {
+                continue;
+            }
+            let key = pkg.key_for(n, keys)?;
+            let mut whole = SectionReader::new(&mut pkg.r, n.offset, s.clone(), &key)?;
+            let Some(v) = nx_nca::hash::verify(&mut whole, s)? else { continue };
+            progress(s.len());
+            if v.bad.is_empty() && v.upper_ok {
+                continue;
+            }
+            // which files sit on the damaged blocks
+            let mut files: Vec<String> = Vec::new();
+            let hit = |off: u64, size: u64| v.bad.iter().any(|(b, l)| off < b + l && *b < off + size.max(1));
+            let mut data = SubReader::new(&mut whole, s.data_offset, s.data_size);
+            if s.fs_type == FS_ROMFS {
+                if let Ok(rom) = nx_fs::RomFs::parse(&mut data) {
+                    files = rom.files.iter().filter(|f| hit(f.offset, f.size)).map(|f| f.path.clone()).collect();
+                }
+            } else if let Ok(list) = nx_container::dump_files(&mut data) {
+                files = list.iter().filter(|f| hit(f.offset, f.size)).map(|f| f.name.clone()).collect();
+            }
+            out.push(Damage { nca: n.name.clone(), section: s.index, bad_blocks: v.bad.len(), files, upper_damaged: !v.upper_ok });
+        }
+    }
+    Ok(out)
+}
+
 pub const CONTENT_DATA: u8 = 4;
 pub const CONTENT_PUBLIC_DATA: u8 = 5;
 
@@ -617,6 +662,51 @@ mod tests {
         assert_eq!((id, n), (0x0100_AAAA_0000_1001, 1));
         assert_eq!(fs::read(out.join("dlc.bin")).unwrap(), vec![5; 100]);
         let _ = fs::remove_dir_all(&out);
+    }
+
+    /// An NCA whose single PFS0 section carries a real SHA-256 hash layer (hash type 2), so `verify` has something to check.
+    fn hashed_nca(files: &[(&str, Vec<u8>)], block: usize) -> Vec<u8> {
+        let pfs = pfs0(files);
+        let table: Vec<u8> = pfs.chunks(block).flat_map(|c| nx_crypto::Sha256::digest(c)).collect();
+        let mut sec = table.clone();
+        sec.resize(table.len().div_ceil(0x200) * 0x200, 0);
+        let data_off = sec.len() as u64;
+        sec.extend(&pfs);
+        let mut n = nca(CONTENT_PROGRAM, TITLE, &[(FS_PFS0, sec)], [0x77; 16], [0; 16]);
+        // patch the section header (still encrypted: decrypt, edit, encrypt), then the data stays as it was
+        let xts = Xts::new(&HK).unwrap();
+        for s in 0..6 {
+            xts.decrypt(Xts::tweak_be(s as u128), &mut n[s * 0x200..(s + 1) * 0x200]);
+        }
+        let fh = 0x400;
+        n[fh + 3] = 2;
+        n[fh + 0x28..fh + 0x2c].copy_from_slice(&(block as u32).to_le_bytes());
+        n[fh + 0x2c..fh + 0x30].copy_from_slice(&2u32.to_le_bytes());
+        n[fh + 0x30..fh + 0x38].copy_from_slice(&0u64.to_le_bytes());
+        n[fh + 0x38..fh + 0x40].copy_from_slice(&(table.len() as u64).to_le_bytes());
+        n[fh + 0x40..fh + 0x48].copy_from_slice(&data_off.to_le_bytes());
+        n[fh + 0x48..fh + 0x50].copy_from_slice(&(pfs.len() as u64).to_le_bytes());
+        n[fh + 8..fh + 0x28].copy_from_slice(&nx_crypto::Sha256::digest(&table));
+        for s in 0..6 {
+            xts.encrypt(Xts::tweak_be(s as u128), &mut n[s * 0x200..(s + 1) * 0x200]);
+        }
+        n
+    }
+
+    #[test]
+    fn verify_finds_the_damaged_file() {
+        let files = [("main", vec![1u8; 300]), ("sdk", vec![2u8; 300]), ("subsdk0", vec![3u8; 300])];
+        let good = hashed_nca(&files, 0x40);
+        let mut pkg = Package::open(Cursor::new(pfs0(&[("p.nca", good.clone())])), &keys(), "x.nsp").unwrap();
+        assert!(verify(&mut pkg, &keys(), &mut |_| {}).unwrap().is_empty());
+        // flip a bit in the second file's data (ciphertext bit flip = the same plaintext bit flip under CTR)
+        let mut bad = good;
+        let at = bad.len() - 450; // the middle of "sdk" (the last 600 bytes hold sdk and subsdk0, 300 each); the CTR bit flip is the same flip in the plaintext
+        bad[at] ^= 1;
+        let mut pkg = Package::open(Cursor::new(pfs0(&[("p.nca", bad)])), &keys(), "x.nsp").unwrap();
+        let d = verify(&mut pkg, &keys(), &mut |_| {}).unwrap();
+        assert_eq!(d.len(), 1);
+        assert_eq!((d[0].nca.as_str(), d[0].upper_damaged, d[0].files.clone()), ("p.nca", false, vec!["sdk".to_string()]));
     }
 
     const CONTROL_FOR_TEST: u8 = CONTENT_CONTROL;

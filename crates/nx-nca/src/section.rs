@@ -31,6 +31,17 @@ pub struct Section {
     pub data_size: u64,
     /// a patch's BKTR tables (encryption type 4)
     pub patch: Option<PatchInfo>,
+    /// the hash tree over the data, for `hash::verify`
+    pub hash: HashInfo,
+}
+
+/// The hash tree a section's data is covered by (section header +8). Type 2 is a two-layer SHA-256 table (ExeFS), type 3 the six-level IVFC tree (RomFS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashInfo {
+    None,
+    Sha256 { block: u32, master: [u8; 32], table: (u64, u64), data: (u64, u64) },
+    /// per level (offset, size, block size as a power of two), then the master hash (32 bytes; the field holds how many bytes of it are used)
+    Ivfc { levels: [(u64, u64, u32); 6], master: [u8; 32], master_len: u32 },
 }
 
 /// Where a patch section keeps its two bucket trees (offsets from the start of the section) and how many entries each holds (section header +0x100 and +0x120).
@@ -134,7 +145,25 @@ pub fn read_full_header<R: Read + Seek>(f: &mut R, at: u64, header_key: &[u8]) -
             sub_size: u64le(&h, fh + 0x128),
             sub_entries: u32le(&h, fh + 0x138),
         });
+        let hash = match hash_type {
+            2 if u32le(&h, fh + 0x2c) >= 2 => HashInfo::Sha256 {
+                block: u32le(&h, fh + 0x28),
+                master: h[fh + 8..fh + 0x28].try_into().unwrap(),
+                table: (u64le(&h, fh + 0x30), u64le(&h, fh + 0x38)),
+                data: (u64le(&h, fh + 0x40), u64le(&h, fh + 0x48)),
+            },
+            3 => {
+                let mut levels = [(0u64, 0u64, 0u32); 6];
+                for (i, l) in levels.iter_mut().enumerate() {
+                    let o = fh + 8 + 0x10 + i * 0x18;
+                    *l = (u64le(&h, o), u64le(&h, o + 8), u32le(&h, o + 16));
+                }
+                HashInfo::Ivfc { levels, master: h[fh + 0xC8..fh + 0xE8].try_into().unwrap(), master_len: u32le(&h, fh + 0x10) }
+            }
+            _ => HashInfo::None,
+        };
         sections.push(Section {
+            hash,
             patch,
             data_offset,
             data_size,
