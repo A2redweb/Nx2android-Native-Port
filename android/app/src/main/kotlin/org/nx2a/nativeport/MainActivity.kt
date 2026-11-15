@@ -90,7 +90,21 @@ class MainActivity : Activity() {
         val tree = prefs.getString("tree", null)
         info.text = "core ${Core.nativeVersion()}\n$keyText\ndumps folder: ${tree?.let { Uri.parse(it).lastPathSegment } ?: "not chosen yet"}"
         list.removeAllViews()
+        showPorted()
         if (tree != null) scan(Uri.parse(tree))
+    }
+
+    /** Games extracted so far, each with a Play button. The host needs the rewritten code in mods/, which the app does not produce yet, so Play is off until it is there. */
+    private fun showPorted() {
+        val games = File(filesDir, "data").listFiles { f -> File(f, "ExeFS").isDirectory }?.sortedBy { it.name } ?: return
+        if (games.isEmpty()) return
+        list.addView(TextView(this).apply { text = "Extracted games"; textSize = 18f; setPadding(0, dp(8), 0, 0) })
+        for (g in games) {
+            val ready = File(g, "mods").isDirectory
+            val nm = try { JSONObject(Core.nativeGames(File(filesDir, "games").path, "", false)).getJSONArray("games").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.firstOrNull { it.optString("id").equals(g.name, true) }?.optString("name") } } catch (_: Exception) { null }
+            list.addView(TextView(this).apply { text = (nm ?: g.name) + if (ready) "" else "\nextracted; the code-rewrite step is not built yet, so it cannot start"; setPadding(0, dp(8), 0, 0) })
+            list.addView(button("Play") { startActivity(Intent(this@MainActivity, PlayActivity::class.java).putExtra(PlayActivity.EXTRA_GAME, g.name)) }.apply { isEnabled = ready })
+        }
     }
 
     private fun scan(tree: Uri) {

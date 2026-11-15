@@ -13,3 +13,4 @@ local.properties
 /android/app/src/main/jniLibs/
 /android/app/src/main/assets/games/
 /android/local.properties
+android/app/src/upstream-java/

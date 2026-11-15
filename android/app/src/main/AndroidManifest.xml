@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -8,6 +13,10 @@
     <application
         android:label="Nx2Android Native"
         android:allowBackup="false"
+        android:isGame="true"
+        android:appCategory="game"
+        android:enableOnBackInvokedCallback="false"
+        android:extractNativeLibs="false"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <activity
@@ -17,6 +26,18 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <!-- the game: upstream's NativeActivity wrapper over libdmhost.so; its own process, so a game that ends takes only itself down (the host is one game per process) -->
+        <activity
+            android:name=".PlayActivity"
+            android:exported="false"
+            android:process=":game"
+            android:screenOrientation="sensorLandscape"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|fontScale|fontWeightAdjustment">
+            <meta-data android:name="android.app.lib_name" android:value="dmhost" />
         </activity>
 
         <service

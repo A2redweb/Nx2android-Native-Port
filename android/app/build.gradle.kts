@@ -27,6 +27,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    sourceSets { getByName("main") { java.srcDir("src/upstream-java") } } // upstream's Java wrapper, copied by tools/build_android.sh
     packaging { jniLibs { useLegacyPackaging = false } } // uncompressed, page-aligned libraries
 }
 // libnxcore.so comes from `cargo ndk -t arm64-v8a -o app/src/main/jniLibs build --release -p nx-jni` (tools/build_android.sh); the game profiles from tools/fetch_profiles.sh.

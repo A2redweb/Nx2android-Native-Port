@@ -54,6 +54,7 @@ class PortService : Service() {
                     val state = s.optString("state")
                     val text = if (state == "running") "${s.optString("stage")} (${s.optLong("bytes") shr 20} MB)" else state
                     getSystemService(NotificationManager::class.java).notify(1, notification("$stem: $text"))
+                    if (state == "done") finish(out, s.optString("title_id"))
                     if (state != "running") break
                     Thread.sleep(1000)
                 }
@@ -67,6 +68,20 @@ class PortService : Service() {
         }.start()
         return START_NOT_STICKY
     }
+
+    /** Moves the extracted files to the folder the game screen reads: data/<profile folder name> (the profile's own spelling of the title ID). */
+    private fun finish(out: File, titleId: String) {
+        val id = File(filesDir, "games").list()?.firstOrNull { it.equals(titleId, ignoreCase = true) } ?: titleId.uppercase()
+        val dst = File(filesDir, "data/$id")
+        dst.parentFile?.mkdirs()
+        if (dst.exists()) File(dst, "RomFS").deleteRecursively().also { File(dst, "ExeFS").deleteRecursively() }
+        dst.mkdirs()
+        for (n in listOf("RomFS", "ExeFS", "control.nacp", "icon.jpg")) File(out, n).takeIf { it.exists() }?.renameTo(File(dst, n))
+        File(dst, "name.txt").writeText(File(out, "name.txt").takeIf { it.exists() }?.readText() ?: stemOf(out))
+        out.deleteRecursively()
+    }
+
+    private fun stemOf(out: File) = out.name
 
     private fun stop(startId: Int): Int {
         stopSelf(startId)
