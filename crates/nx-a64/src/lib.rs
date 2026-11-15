@@ -80,6 +80,11 @@ fn bit(r: u32) -> u32 {
     }
 }
 
+/// Whether `w` is an instruction (capstone's "can decode this word", which the rewriter uses to tell code from data). For now only the group check; see docs/ARCHITECTURE.md.
+pub fn valid(w: u32) -> bool {
+    decode(w).known
+}
+
 /// Decodes the register fields of `w`.
 pub fn decode(w: u32) -> Insn {
     let mut i = Insn { word: w, known: true, ..Default::default() };
