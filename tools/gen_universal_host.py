@@ -31,7 +31,7 @@ for g in games:
 
 ARRAYS = {'DM_GAME_MODULES', 'DM_GAME_NMOD', 'DM_GAME_DISPLAY_VERSIONS'}
 OPTIONAL = {'DM_GAME_SHARED_FONT_TTF': '-1', 'DM_GAME_NVN_API_MAJOR': '-1', 'DM_GAME_NVN_API_MINOR': '-1'}   # absent = decided by the SDK version
-names = sorted({k for d in per for k in d} | set(OPTIONAL) - ARRAYS)
+names = sorted(({k for d in per for k in d} | set(OPTIONAL)) - ARRAYS)
 def ctype(name):
     vals = [d[name] for d in per if name in d]
     if all(v.startswith('"') for v in vals): return 'const char *'
