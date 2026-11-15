@@ -53,6 +53,49 @@ pub fn write_switch_files(profiles: &Path, id: &str, game_dir: &Path, language: 
     Ok(())
 }
 
+/// Rewrites the game's code modules into `mods/` of its data folder (what the host loads: `<module>.patched.bin` with its `.fixups.tsv` and `.gates.tsv`).
+/// The modules are the profile's `modules` row; `cuts_tsv` is `cuts.tsv` of `tools/gen_cuts.py`. `mods/` appears only when every module is done. Returns a one-line summary.
+pub fn rewrite_modules(profiles: &Path, cuts_tsv: &str, id: &str, game_dir: &Path) -> Result<String, String> {
+    let dir = std::fs::read_dir(profiles)
+        .map_err(|e| format!("{}: {e}", profiles.display()))?
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(id))
+        .map(|e| e.path())
+        .ok_or_else(|| format!("no profile for {id}"))?;
+    let g = nx_profile::GameProfile::load(&dir).map_err(|e| format!("{id}: {e}"))?;
+    let mut modules: Vec<String> = g.values("modules").into_iter().flat_map(|r| r.iter().flat_map(|w| w.split_whitespace().map(String::from)).collect::<Vec<_>>()).collect();
+    if modules.is_empty() {
+        modules = ["main", "sdk"].map(String::from).to_vec();
+    }
+    let cuts = nx_rewrite::cuts::parse(cuts_tsv)?;
+    let tmp = game_dir.join("mods.tmp");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    let mut summary = vec![];
+    for m in &modules {
+        let src = game_dir.join("ExeFS").join(m);
+        if !src.is_file() {
+            continue; // a profile lists the modules some builds have
+        }
+        let bytes = std::fs::read(&src).map_err(|e| format!("{m}: {e}"))?;
+        let nso = nx_nso::Nso::parse(&bytes).map_err(|e| format!("{m}: {e}"))?;
+        let list = cuts.get(&nso.build_id_hex()).map(Vec::as_slice).unwrap_or(&[]);
+        let o = nx_rewrite::rewrite(&bytes, list).map_err(|e| format!("{m}: {e}"))?;
+        for (ext, data) in [("patched.bin", &o.patched[..]), ("fixups.tsv", o.fixups.as_bytes()), ("gates.tsv", o.gates.as_bytes()), ("sites.tsv", o.sites.as_bytes()), ("cuts.tsv", o.cuts.as_bytes()), ("obs.tsv", o.obs.as_bytes())] {
+            std::fs::write(tmp.join(format!("{m}.{ext}")), data).map_err(|e| format!("{m}.{ext}: {e}"))?;
+        }
+        summary.push(format!("{m}: {} sites, {} cuts", o.stats.values().sum::<usize>(), list.len()));
+    }
+    if summary.is_empty() {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(format!("{id}: none of the modules {} is in ExeFS", modules.join(" ")));
+    }
+    let mods = game_dir.join("mods");
+    let _ = std::fs::remove_dir_all(&mods);
+    std::fs::rename(&tmp, &mods).map_err(|e| e.to_string())?;
+    Ok(summary.join("; "))
+}
+
 /// The games list as JSON (`{"games":[...]}`) or `{"error":"..."}`. `overlay` is the text of upstream's `overlay_default.tsv`, when the controls should be validated.
 pub fn games_json(profiles_dir: &str, overlay: &str, all: bool) -> String {
     let controls = (!overlay.is_empty()).then(|| nx_profile::overlay_controls(overlay));
@@ -217,6 +260,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
     use super::*;
+
+    #[test]
+    fn modules_are_rewritten_into_mods() {
+        let root = std::env::temp_dir().join(format!("nxcore-rw-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let prof = root.join("games/0100abcd00000000");
+        std::fs::create_dir_all(&prof).unwrap();
+        std::fs::write(prof.join("game.tsv"), "id\t0100ABCD00000000\nmodules\tmain sdk\n").unwrap();
+        let game = root.join("data");
+        std::fs::create_dir_all(game.join("ExeFS")).unwrap();
+        std::fs::write(game.join("ExeFS/main"), nx_rewrite::testing::fake_nso(&[0xAA00_03F2, 0xD65F_03C0])).unwrap();
+        let msg = super::rewrite_modules(&root.join("games"), "", "0100ABCD00000000", &game).unwrap();
+        assert!(msg.starts_with("main: 1 sites"), "{msg}");
+        for e in ["patched.bin", "fixups.tsv", "gates.tsv"] {
+            assert!(game.join("mods").join(format!("main.{e}")).is_file(), "{e}");
+        }
+        assert!(!game.join("mods.tmp").exists());
+        std::fs::remove_dir_all(game.join("ExeFS/main")).ok();
+        std::fs::remove_file(game.join("ExeFS/main")).unwrap();
+        assert!(super::rewrite_modules(&root.join("games"), "", "0100ABCD00000000", &game).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn json_escaping() {

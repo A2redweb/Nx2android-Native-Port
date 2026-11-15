@@ -13,4 +13,6 @@ object Core {
     external fun nativeStatus(id: Int): String
     /** Writes env.txt and settings.txt into a game's folder; returns an error text, empty when done. */
     external fun nativePrepare(profiles: String, id: String, dir: String, language: String): String
+    /** Rewrites the game's code into its mods/ folder (minutes for a big game). Returns "ok: ..." or "error: ...". */
+    external fun nativeRewrite(profiles: String, id: String, dir: String): String
 }

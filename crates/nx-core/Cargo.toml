@@ -8,3 +8,5 @@ license.workspace = true
 nx-profile = { path = "../nx-profile" }
 nx-keys = { path = "../nx-keys" }
 nx-extract = { path = "../nx-extract" }
+nx-rewrite = { path = "../nx-rewrite" }
+nx-nso = { path = "../nx-nso" }

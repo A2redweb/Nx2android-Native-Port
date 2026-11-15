@@ -16,7 +16,9 @@ version = "0.1.0"
 dependencies = [
  "nx-extract",
  "nx-keys",
+ "nx-nso",
  "nx-profile",
+ "nx-rewrite",
 ]
 
 [[package]]

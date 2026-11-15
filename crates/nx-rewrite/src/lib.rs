@@ -7,6 +7,7 @@
 pub mod analysis;
 pub mod asm;
 pub mod cfi;
+pub mod cuts;
 pub mod emit;
 pub mod pat;
 
@@ -321,12 +322,11 @@ pub fn rewrite(nso_bytes: &[u8], cuts: &[Cut]) -> R<Output> {
     Ok(out)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
+/// Synthetic modules for tests (here and in the crates that drive the rewriter).
+#[doc(hidden)]
+pub mod testing {
     /// An uncompressed NSO: text 0x1000 (b over the MOD0 pointer; `code` from 0x10; MOD0 at 0x800 with an empty eh_frame_hdr), ro 0x1000, data 0x1000, bss 0x1000
-    fn fake_nso(code: &[u32]) -> Vec<u8> {
+    pub fn fake_nso(code: &[u32]) -> Vec<u8> {
         let mut text: Vec<u8> = (0..0x400).flat_map(|_| 0xD503_201Fu32.to_le_bytes()).collect(); // nops: zero words are data to the data-block detector
         text[..4].copy_from_slice(&0x1400_0004u32.to_le_bytes());
         text[4..8].copy_from_slice(&0x800u32.to_le_bytes());
@@ -349,6 +349,13 @@ mod tests {
         h.extend(vec![0u8; 0x2000]);
         h
     }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::fake_nso;
 
     fn word(o: &Output, off: i64) -> u32 {
         rd32(&o.patched, off)

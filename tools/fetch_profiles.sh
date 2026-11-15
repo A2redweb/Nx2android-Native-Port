@@ -20,4 +20,5 @@ for d in "$src"/nxnative/dm/games/*/; do
     [ -f "$d$f" ] && cp "$d$f" "$dst/$id/$f"
   done
 done
+python3 "$here/tools/gen_cuts.py" "$src" "$dst"
 echo "profiles: $(ls "$dst" | wc -l) games copied to $dst"

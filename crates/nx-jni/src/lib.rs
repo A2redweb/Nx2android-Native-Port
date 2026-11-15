@@ -91,3 +91,15 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativePrepare(env: J
     let r = nx_core::write_switch_files(std::path::Path::new(&get(env, profiles)), &get(env, id), std::path::Path::new(&get(env, dir)), &get(env, language));
     make(env, &r.err().unwrap_or_default())
 }
+
+/// Rewrites the game's code modules into mods/ (`cuts.tsv` sits in the profiles folder). Returns "ok: <summary>" or "error: <message>".
+#[no_mangle]
+pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeRewrite(env: JNIEnv, _c: JClass, profiles: JString, id: JString, dir: JString) -> JString {
+    let profiles = get(env, profiles);
+    let cuts = std::fs::read_to_string(std::path::Path::new(&profiles).join("cuts.tsv")).unwrap_or_default();
+    let r = nx_core::rewrite_modules(std::path::Path::new(&profiles), &cuts, &get(env, id), std::path::Path::new(&get(env, dir)));
+    make(env, &match r {
+        Ok(s) => format!("ok: {s}"),
+        Err(e) => format!("error: {e}"),
+    })
+}

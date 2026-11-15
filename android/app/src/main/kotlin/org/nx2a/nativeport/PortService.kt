@@ -81,6 +81,10 @@ class PortService : Service() {
         out.deleteRecursively()
         val err = Core.nativePrepare(File(filesDir, "games").path, id, dst.path, java.util.Locale.getDefault().toLanguageTag())
         if (err.isNotEmpty()) android.util.Log.e("nx2a", "switch files: $err")
+        File(dst, "mods").deleteRecursively()   // an older port's code must not outlive a failed rewrite
+        val rw = Core.nativeRewrite(File(filesDir, "games").path, id, dst.path)
+        File(dst, "rewrite.txt").writeText(rw + "\n")
+        android.util.Log.i("nx2a", "rewrite: $rw")
     }
 
     private fun stemOf(out: File) = out.name
