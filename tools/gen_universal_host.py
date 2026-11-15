@@ -31,7 +31,7 @@ for g in games:
 
 ARRAYS = {'DM_GAME_MODULES', 'DM_GAME_NMOD', 'DM_GAME_DISPLAY_VERSIONS'}
 OPTIONAL = {'DM_GAME_SHARED_FONT_TTF': '-1', 'DM_GAME_NVN_API_MAJOR': '-1', 'DM_GAME_NVN_API_MINOR': '-1'}   # absent = decided by the SDK version
-names = sorted({k for d in per for k in d} - ARRAYS)
+names = sorted({k for d in per for k in d} | set(OPTIONAL) - ARRAYS)
 def ctype(name):
     vals = [d[name] for d in per if name in d]
     if all(v.startswith('"') for v in vals): return 'const char *'
@@ -98,7 +98,7 @@ def patch(rel, old, new):
 patch('android/overlay_layout.h', 'static const ov_ctl OV_LAYOUTS[2][DM_AOV_N] = {{DM_AOV_TABLET}, {DM_AOV_PHONE}};',
       'static const ov_ctl OV_LAYOUTS_ALL[DM_NGAMES][2][DM_AOV_N] = {DM_AOV_ALL};\n#define OV_LAYOUTS (OV_LAYOUTS_ALL[g_dm_prof_index])')
 patch('host/main.c', 'static const char *def[] = DM_GAME_MODULES;', 'const char *const *def = DM_GAME_MODULES;')
-patch('host/hle_sdk16.c', 'static const struct { const char *build, *ver; } k[] = {DM_GAME_DISPLAY_VERSIONS};', 'const __typeof__(g_dm_prof->versions) k = DM_GAME_DISPLAY_VERSIONS;')
+patch('host/hle_sdk16.c', 'static const struct { const char *build, *ver; } k[] = {DM_GAME_DISPLAY_VERSIONS};', 'const __typeof__(g_dm_prof->versions[0]) *k = DM_GAME_DISPLAY_VERSIONS;')
 patch('host/hle_sdk16.c', 'j < sizeof k / sizeof *k; j++', 'j < (unsigned)DM_GAME_NVERSIONS; j++')
 patch('host/hle_sdk16.c', '#ifdef DM_GAME_SHARED_FONT_TTF\n', 'if (DM_GAME_SHARED_FONT_TTF >= 0) {\n')
 patch('host/hle_sdk16.c', '#else\n        int m = dm_sdk_major(), dec', '} else {\n        int m = dm_sdk_major(), dec')
