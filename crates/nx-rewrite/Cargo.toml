@@ -1,0 +1,9 @@
+[package]
+name = "nx-rewrite"
+version = "0.1.0"
+edition = "2021"
+description = "NSO code rewriter: a port of upstream's patch_nso.py (Android target) so game code runs natively on Android"
+
+[dependencies]
+nx-a64 = { path = "../nx-a64" }
+nx-nso = { path = "../nx-nso" }

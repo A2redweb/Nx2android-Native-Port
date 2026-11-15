@@ -83,6 +83,14 @@ name = "nx-profile"
 version = "0.1.0"
 
 [[package]]
+name = "nx-rewrite"
+version = "0.1.0"
+dependencies = [
+ "nx-a64",
+ "nx-nso",
+]
+
+[[package]]
 name = "nx-zstd"
 version = "0.1.0"
 
