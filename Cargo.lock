@@ -26,6 +26,13 @@ name = "nx-crypto"
 version = "0.1.0"
 
 [[package]]
+name = "nx-dmsv"
+version = "0.1.0"
+dependencies = [
+ "nx-zstd",
+]
+
+[[package]]
 name = "nx-extract"
 version = "0.1.0"
 dependencies = [
