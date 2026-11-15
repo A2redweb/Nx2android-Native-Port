@@ -1,0 +1,32 @@
+name: universal-host
+# Builds one game-independent libdmhost.so (every game profile inside, picked at start by DM_GAME) from upstream's host sources
+on:
+  workflow_dispatch:
+    inputs:
+      upstream:
+        description: shirai91/nx2android commit or branch
+        default: main
+  push:
+    paths: ['tools/gen_universal_host.py', 'tools/build_universal_host.sh', '.github/workflows/host.yml']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch upstream
+        run: |
+          mkdir -p /tmp/up && curl -fsSL "https://codeload.github.com/shirai91/nx2android/tar.gz/${{ inputs.upstream || 'main' }}" | tar -xz -C /tmp/up --strip-components=1
+      - name: Install NDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.0.12433566" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.0.12433566" >> "$GITHUB_ENV"
+      - name: Build libdmhost.so
+        run: tools/build_universal_host.sh /tmp/up /tmp/uw
+      - name: Inspect
+        run: |
+          f=/tmp/uw/out/libdmhost.so
+          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -lW "$f" | grep LOAD
+          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" -D "$f" | grep -E " T (ANativeActivity_onCreate|g_dm)" || true
+          strings "$f" | grep -c '^0100' || true
+      - uses: actions/upload-artifact@v4
+        with: { name: libdmhost, path: /tmp/uw/out/libdmhost.so }
