@@ -29,7 +29,13 @@ The engine itself (`nxnative/dm/host` 10,666 lines of C and `dm/android` 9,989 l
 
 `build.py` compiles the same C sources for every game. What differs per game is two generated headers: `game_profile.h` (from `game.tsv`; the host reads about 23 of its macros, such as `GAME_FPS_TARGET`, `GAME_ARGS`, `GAME_MEM_ALIAS`, `GAME_MODULES`) and `android_profile.h` (the gamepad layout from `android.tsv`). Everything else, including the backend's own shaders, is identical.
 
-So: build `libdmhost.so` once (CI, with the NDK), and make the host read those values at run time from a small profile file the app writes into the game's data folder. That needs a change in upstream's C (macro to run-time value at about 23 use sites). **Unproven**: how many of those sites sit in hot paths or in array sizes that need a compile-time constant. Counting them is the first job of the host spike.
+So: build `libdmhost.so` once (CI, with the NDK), and make the host read those values at run time instead of compiling them in.
+
+**Measured** (read from upstream's sources, not run): the profile macros have about 55 use sites across 28 macros. Nearly all are scalar or string expressions used at run time (`#define RESERVE DM_GAME_MEM_RESERVE`, `APP_POOL`, flags, `DM_GAME_ARGS`, `DM_GAME_ENV`), so they become fields of one profile struct. The exceptions:
+- Arrays and static initialisers: `DM_GAME_MODULES` / `DM_GAME_NMOD` and `DM_GAME_DISPLAY_VERSIONS` (brace lists) and `DM_AOV_N` (array sizes in `front_android.c:82` and `overlay_layout.h:12-13`). These need a run-time array or a fixed maximum size.
+- Two `#ifdef` sites where the macro's absence means "decide by SDK version": `DM_GAME_SHARED_FONT_TTF` (`host/hle_sdk16.c:135`) and `DM_GAME_NVN_API_MAJOR` (`gfx/nvn/hle_nvn.c:161`). The struct needs an "unset" value (-1) for these two.
+
+Proposed design: `game.py` emits one table with every game's profile struct instead of one header; the host picks its entry by title ID at start (`g_dm_prof->field` replaces each macro). Not yet tried: the change to upstream's C and whether any use site is hot enough to matter. The first step is a build in CI of the host with the table, checked by running upstream's own host unit tests.
 
 ## One app, not one APK per game (proposal)
 
