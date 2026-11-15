@@ -1,0 +1,5 @@
+[package]
+name = "nx-a64"
+version = "0.1.0"
+edition = "2021"
+description = "AArch64 (ARMv8.0-A with crypto) instruction fields: which general registers an instruction names, reads and writes, and its branch target"
