@@ -28,6 +28,31 @@ pub fn json_str(s: &str) -> String {
     o
 }
 
+/// Writes the host's switch files into a game's data folder, as upstream's porter does: `env.txt` (`DM_LANG`, then the profile's `env` rows) and `settings.txt` (the profile's
+/// `setting` rows; an existing one is the player's and stays). `profiles` is the folder of profile folders; the game's folder is found by ID, ignoring case.
+pub fn write_switch_files(profiles: &Path, id: &str, game_dir: &Path, language: &str) -> Result<(), String> {
+    let dir = std::fs::read_dir(profiles)
+        .map_err(|e| format!("{}: {e}", profiles.display()))?
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(id))
+        .map(|e| e.path())
+        .ok_or_else(|| format!("no profile for {id}"))?;
+    let text = std::fs::read_to_string(dir.join("android.tsv")).map_err(|e| format!("{id}: no android.tsv ({e})"))?;
+    let p = nx_profile::AndroidProfile::parse(id, &dir.join("android.tsv").to_string_lossy(), &text, None).map_err(|e| e.0)?;
+    let mut env = format!("# Written by Nx2Android Native for {id}; KEY=VALUE per line, read by the host at launch\nDM_LANG={language}\n");
+    for r in p.env() {
+        env.push_str(r);
+        env.push('\n');
+    }
+    std::fs::create_dir_all(game_dir).map_err(|e| e.to_string())?;
+    std::fs::write(game_dir.join("env.txt"), env).map_err(|e| e.to_string())?;
+    let settings: String = p.settings().iter().map(|(k, v)| format!("{k}={v}\n")).collect();
+    if !settings.is_empty() && !game_dir.join("settings.txt").exists() {
+        std::fs::write(game_dir.join("settings.txt"), settings).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// The games list as JSON (`{"games":[...]}`) or `{"error":"..."}`. `overlay` is the text of upstream's `overlay_default.tsv`, when the controls should be validated.
 pub fn games_json(profiles_dir: &str, overlay: &str, all: bool) -> String {
     let controls = (!overlay.is_empty()).then(|| nx_profile::overlay_controls(overlay));
@@ -173,6 +198,24 @@ pub fn status_json(id: u32) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn switch_files_follow_the_profile() {
+        let root = std::env::temp_dir().join(format!("nxc-sw-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("0100ABCD00000000")).unwrap();
+        std::fs::write(root.join("0100ABCD00000000/android.tsv"), "status\tplayable\nenv\tDM_NVN_ASYNC=1\nsetting\tdocked=0\n").unwrap();
+        let out = root.join("data");
+        super::write_switch_files(&root, "0100abcd00000000", &out, "en-US").unwrap();
+        let env = std::fs::read_to_string(out.join("env.txt")).unwrap();
+        assert!(env.contains("DM_LANG=en-US\nDM_NVN_ASYNC=1\n"));
+        assert_eq!(std::fs::read_to_string(out.join("settings.txt")).unwrap(), "docked=0\n");
+        std::fs::write(out.join("settings.txt"), "docked=1\n").unwrap(); // the player's choice stays
+        super::write_switch_files(&root, "0100ABCD00000000", &out, "ja").unwrap();
+        assert_eq!(std::fs::read_to_string(out.join("settings.txt")).unwrap(), "docked=1\n");
+        assert!(std::fs::read_to_string(out.join("env.txt")).unwrap().contains("DM_LANG=ja"));
+        assert!(super::write_switch_files(&root, "0100FFFF00000000", &out, "x").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
     use super::*;
 
     #[test]

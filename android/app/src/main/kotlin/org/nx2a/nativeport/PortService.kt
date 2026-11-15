@@ -79,6 +79,8 @@ class PortService : Service() {
         for (n in listOf("RomFS", "ExeFS", "control.nacp", "icon.jpg")) File(out, n).takeIf { it.exists() }?.renameTo(File(dst, n))
         File(dst, "name.txt").writeText(File(out, "name.txt").takeIf { it.exists() }?.readText() ?: stemOf(out))
         out.deleteRecursively()
+        val err = Core.nativePrepare(File(filesDir, "games").path, id, dst.path, java.util.Locale.getDefault().toLanguageTag())
+        if (err.isNotEmpty()) android.util.Log.e("nx2a", "switch files: $err")
     }
 
     private fun stemOf(out: File) = out.name

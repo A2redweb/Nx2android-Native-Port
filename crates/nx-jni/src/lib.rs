@@ -85,3 +85,9 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeExtract(
 pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeStatus(env: JNIEnv, _c: JClass, id: i32) -> JString {
     make(env, &nx_core::status_json(id as u32))
 }
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativePrepare(env: JNIEnv, _c: JClass, profiles: JString, id: JString, dir: JString, language: JString) -> JString {
+    let r = nx_core::write_switch_files(std::path::Path::new(&get(env, profiles)), &get(env, id), std::path::Path::new(&get(env, dir)), &get(env, language));
+    make(env, &r.err().unwrap_or_default())
+}
