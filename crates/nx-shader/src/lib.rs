@@ -6,3 +6,5 @@ pub mod spirv;
 pub mod bind;
 pub mod job;
 pub mod pipeline;
+pub mod lzma;
+pub mod unity;

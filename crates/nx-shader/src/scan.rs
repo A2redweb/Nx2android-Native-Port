@@ -1,6 +1,7 @@
 //! Scans a game's files for shaders and keeps them on disk: a spool file holds each distinct shader's control section and code area; memory holds only the index.
 
-use crate::split::{scan_file, skey, Found, Stage};
+use crate::split::{scan_file_with, skey, Found, Stage, UnityState};
+use crate::unity::Trees;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
@@ -73,7 +74,8 @@ impl Merger {
 
 /// Scans every file under `root` (labels are paths relative to it, `/`-separated, prefixed by `prefix`) on `threads` threads. Results are merged in file order, so the same input gives the same index.
 /// A file that fails to read as a container is reported in `skipped` and left out; a shader that contradicts an earlier one with its key stops the scan.
-pub fn scan_dir(roots: &[(PathBuf, String)], spool: &Path, threads: usize, progress: &(dyn Fn(usize, usize) + Sync)) -> Result<(Index, Vec<(String, String)>), String> {
+pub fn scan_dir(roots: &[(PathBuf, String)], common: Option<HashMap<u32, String>>, spool: &Path, threads: usize, progress: &(dyn Fn(usize, usize) + Sync)) -> Result<(Index, Vec<(String, String)>), String> {
+    let common = common.map(Arc::new);
     let mut files: Vec<(PathBuf, String)> = vec![];
     for (root, prefix) in roots {
         let mut v = vec![];
@@ -86,18 +88,19 @@ pub fn scan_dir(roots: &[(PathBuf, String)], spool: &Path, threads: usize, progr
     let total = files.len();
     let next = Arc::new(AtomicUsize::new(0));
     let files = Arc::new(files);
-    let (tx, rx) = mpsc::channel::<(usize, Result<Vec<Found>, String>)>();
+    type Scanned = Result<(Vec<Found>, Trees, bool), String>;
+    let (tx, rx) = mpsc::channel::<(usize, Scanned)>();
     let mut merger = Merger { w: BufWriter::new(File::create(spool).map_err(|e| e.to_string())?), pos: 0, ents: BTreeMap::new() };
     let mut skipped = vec![];
     std::thread::scope(|sc| -> Result<(), String> {
         for _ in 0..threads.max(1) {
-            let (tx, next, files) = (tx.clone(), next.clone(), files.clone());
+            let (tx, next, files, common) = (tx.clone(), next.clone(), files.clone(), common.clone());
             sc.spawn(move || loop {
                 let i = next.fetch_add(1, Ordering::Relaxed);
                 let Some((path, label)) = files.get(i) else { break };
                 let r = std::fs::read(path).map_err(|e| e.to_string()).and_then(|d| {
-                    let mut out = vec![];
-                    scan_file(&d, label, &mut out).map(|_| out)
+                    let (mut out, mut u) = (vec![], UnityState { common: common.clone(), trees: Trees::new(), borrowed: false });
+                    scan_file_with(&d, label, &mut out, &mut u).map(|defer| (out, u.trees, defer))
                 });
                 if tx.send((i, r)).is_err() {
                     break;
@@ -105,13 +108,18 @@ pub fn scan_dir(roots: &[(PathBuf, String)], spool: &Path, threads: usize, progr
             });
         }
         drop(tx);
-        let mut pending: HashMap<usize, Result<Vec<Found>, String>> = HashMap::new();
+        let mut pending: HashMap<usize, Scanned> = HashMap::new();
+        let (mut trees, mut deferred): (Trees, Vec<usize>) = (Trees::new(), vec![]);
         let mut want = 0;
         while let Ok((i, r)) = rx.recv() {
             pending.insert(i, r);
             while let Some(r) = pending.remove(&want) {
                 match r {
-                    Ok(found) => {
+                    Ok((found, t, defer)) => {
+                        trees.extend(t);
+                        if defer {
+                            deferred.push(want);
+                        }
                         for f in found {
                             merger.add(f)?;
                         }
@@ -120,6 +128,38 @@ pub fn scan_dir(roots: &[(PathBuf, String)], spool: &Path, threads: usize, progr
                 }
                 want += 1;
                 progress(want, total);
+            }
+        }
+        // second pass: Unity files that had no type tree of their own, with the trees the other files recorded and the layouts upstream keeps
+        if !deferred.is_empty() {
+            for (k, v) in crate::unity::known_trees()? {
+                trees.entry(k).or_insert(v);
+            }
+            let next = AtomicUsize::new(0);
+            let results: Vec<std::sync::Mutex<Option<Scanned>>> = deferred.iter().map(|_| std::sync::Mutex::new(None)).collect();
+            std::thread::scope(|sc2| {
+                for _ in 0..threads.max(1).min(deferred.len()) {
+                    sc2.spawn(|| loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(&fi) = deferred.get(i) else { break };
+                        let (path, label) = &files[fi];
+                        let r = std::fs::read(path).map_err(|e| e.to_string()).and_then(|d| {
+                            let (mut out, mut u) = (vec![], UnityState { common: common.clone(), trees: trees.clone(), borrowed: true });
+                            scan_file_with(&d, label, &mut out, &mut u).map(|defer| (out, u.trees, defer))
+                        });
+                        *results[i].lock().unwrap() = Some(r);
+                    });
+                }
+            });
+            for (i, r) in results.into_iter().enumerate() {
+                match r.into_inner().unwrap().unwrap() {
+                    Ok((found, _, _)) => {
+                        for f in found {
+                            merger.add(f)?;
+                        }
+                    }
+                    Err(e) => skipped.push((files[deferred[i]].1.clone(), e)),
+                }
             }
         }
         Ok(())
@@ -142,13 +182,32 @@ mod tests {
         std::fs::write(root.join("sub/copy.bfsha"), &bnsh).unwrap(); // the same shaders again: one entry each
         std::fs::write(root.join("sub/other.bin"), b"nothing here").unwrap();
         let spool = root.join("spool");
-        let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], &spool, 3, &|_, _| {}).unwrap();
+        let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], None, &spool, 3, &|_, _| {}).unwrap();
         assert!(skipped.is_empty(), "{skipped:?}");
         assert_eq!(idx.ents.len(), 2);
         let k = skey(&vctl, &vcode);
         assert_eq!(idx.ents[&k].label, "/a.bfsha#BNSH@0x0#var0");
         let (c, d) = idx.load(k).unwrap();
         assert_eq!((c, d), (vctl, vcode));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_unity_file_without_trees_borrows_them_in_a_second_pass() {
+        let root = std::env::temp_dir().join(format!("nxscan-u-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // 'a' sorts first and has no tree of its own, 'b' brings the tree
+        std::fs::write(root.join("a.assets"), crate::unity::tests_serialized(false)).unwrap();
+        std::fs::write(root.join("b.assets"), crate::unity::tests_serialized(true)).unwrap();
+        let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], Some(HashMap::new()), &root.join("spool"), 2, &|_, _| {}).unwrap();
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert_eq!(idx.ents.len(), 2);
+        assert!(idx.ents.values().all(|e| e.label.starts_with("/b.assets#")), "the keys come from the file read first, which is b: a was deferred");
+        // without b nothing lends a tree: a is reported, not guessed at
+        std::fs::remove_file(root.join("b.assets")).unwrap();
+        let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], Some(HashMap::new()), &root.join("spool"), 2, &|_, _| {}).unwrap();
+        assert_eq!((idx.ents.len(), skipped.len()), (0, 1));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

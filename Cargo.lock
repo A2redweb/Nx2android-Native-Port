@@ -106,6 +106,7 @@ version = "0.1.0"
 dependencies = [
  "nx-crypto",
  "nx-dmsv",
+ "nx-nso",
  "nx-zstd",
 ]
 

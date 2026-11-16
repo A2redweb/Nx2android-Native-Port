@@ -305,16 +305,59 @@ pub fn scan_blob(d: &[u8], label: &str, out: &mut Vec<Found>) -> Result<(), Stri
     Ok(())
 }
 
-/// A file's shaders: a zstd file is decompressed first, whatever its name
-pub fn scan_file(bytes: &[u8], label: &str, out: &mut Vec<Found>) -> Result<(), String> {
+/// What the Unity reader needs beyond the file: the common string table of main's image and the type trees seen so far
+pub struct UnityState {
+    pub common: Option<std::sync::Arc<std::collections::HashMap<u32, String>>>,
+    pub trees: crate::unity::Trees,
+    /// the second pass: trees are borrowed, and a ComputeShader without one is left out
+    pub borrowed: bool,
+}
+
+impl UnityState {
+    pub fn none() -> Self {
+        UnityState { common: None, trees: Default::default(), borrowed: false }
+    }
+}
+
+/// A file's shaders: a zstd file is decompressed first, whatever its name. Ok(true): a Unity file whose type trees are not known yet, to be scanned again with borrowed ones (nothing is added to `out`)
+pub fn scan_file_with(bytes: &[u8], label: &str, out: &mut Vec<Found>, u: &mut UnityState) -> Result<bool, String> {
+    let owned;
+    let mut bytes = bytes;
     if bytes.get(..4) == Some(&ZSTD_MAGIC[..]) {
-        return scan_blob(&unzs(bytes)?, label, out);
+        owned = unzs(bytes)?;
+        bytes = &owned;
+    }
+    let yaz;
+    if bytes.get(..4) == Some(b"Yaz0") {
+        yaz = yaz0(bytes)?;
+        bytes = &yaz;
+    }
+    if bytes.get(..8) == Some(b"UnityFS\0") || (bytes.get(8..11) == Some(&[0, 0, 0][..]) && crate::unity::is_serialized(bytes)) {
+        let common = u.common.clone().ok_or("a Unity asset, but main has no Unity common string table")?;
+        let mut mine = vec![];
+        let before = u.trees.clone();
+        return match crate::unity::unity_shaders(bytes, label, &common, &mut u.trees, u.borrowed, &mut mine) {
+            Ok(()) => {
+                out.extend(mine);
+                Ok(false)
+            }
+            Err(crate::unity::UErr::NoTree(_)) if !u.borrowed => {
+                u.trees = before; // a deferred file lends no trees
+                Ok(true)
+            }
+            Err(e) => Err(e.to_string()),
+        };
     }
     let interesting = bytes.get(..4).is_some_and(|m| matches!(m, b"Yaz0" | b"SARC" | b"BAHS")) || find_all(bytes, b"BNSH\0\0\0\0").next().is_some() || find_all(bytes, &[0x91, 0x68, 0x86, 0x19]).next().is_some();
     if interesting {
         scan_blob(bytes, label, out)?;
     }
-    Ok(())
+    Ok(false)
+}
+
+/// `scan_file_with` for a file that cannot be Unity
+pub fn scan_file(bytes: &[u8], label: &str, out: &mut Vec<Found>) -> Result<(), String> {
+    scan_file_with(bytes, label, out, &mut UnityState::none()).map(|_| ())
 }
 
 #[cfg(test)]

@@ -9,3 +9,4 @@ description = "Shader pipeline: finds a game's Switch shaders in its files, buil
 nx-crypto = { path = "../nx-crypto" }
 nx-zstd = { path = "../nx-zstd" }
 nx-dmsv = { path = "../nx-dmsv" }
+nx-nso = { path = "../nx-nso" }
