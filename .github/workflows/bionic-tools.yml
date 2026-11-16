@@ -19,5 +19,11 @@ jobs:
           echo "KEY=$(python3 tools/prebuilt_key.py /tmp/up)" >> "$GITHUB_ENV"
       - name: Build the translator for linux-bionic-arm64
         run: bash tools/make_bionic_tools.sh /tmp/up /tmp/out
+      - name: Why it failed (diagnostic)
+        if: failure()
+        run: |
+          ls ~/.nuget/packages | grep -i -E "ilcompiler|runtime\." || true
+          grep -rn "PrivateSdkAssemblies" ~/.nuget/packages/microsoft.dotnet.ilcompiler/*/build/ | cut -c1-300 || true
+          for d in ~/.nuget/packages/runtime.*ilcompiler*/*; do echo "== $d"; ls "$d" "$d/sdk" 2>/dev/null | head -20; done
       - uses: actions/upload-artifact@v4
         with: { name: 'bionic-tools-${{ env.KEY }}', path: /tmp/out }
