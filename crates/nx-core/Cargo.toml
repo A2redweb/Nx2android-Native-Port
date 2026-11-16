@@ -10,3 +10,4 @@ nx-keys = { path = "../nx-keys" }
 nx-extract = { path = "../nx-extract" }
 nx-rewrite = { path = "../nx-rewrite" }
 nx-nso = { path = "../nx-nso" }
+nx-shader = { path = "../nx-shader" }

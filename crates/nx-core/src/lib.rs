@@ -96,6 +96,63 @@ pub fn rewrite_modules(profiles: &Path, cuts_tsv: &str, id: &str, game_dir: &Pat
     Ok(summary.join("; "))
 }
 
+fn find_profile(profiles: &Path, id: &str) -> Result<std::path::PathBuf, String> {
+    std::fs::read_dir(profiles)
+        .map_err(|e| format!("{}: {e}", profiles.display()))?
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(id))
+        .map(|e| e.path())
+        .ok_or_else(|| format!("no profile for {id}"))
+}
+
+/// Builds `shaders.dmsv` of the game's data folder from the shaders in its RomFS: the profile's facts and handle remaps, the translator `xlate` (its command words) and a scratch folder.
+/// Returns a one-line summary; fails when any shader that was meant to be in the bundle is missing from it.
+pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<String>, threads: usize, progress: &(dyn Fn(&str, usize, usize) + Sync)) -> Result<String, String> {
+    use nx_shader::json::Json;
+    let dir = find_profile(profiles, id)?;
+    let g = nx_profile::GameProfile::load(&dir).map_err(|e| format!("{id}: {e}"))?;
+    let mut facts = std::collections::BTreeMap::new();
+    if let Ok(t) = std::fs::read_to_string(dir.join("shader_facts.tsv")) {
+        for l in t.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
+            let (k, j) = l.split_once('\t').ok_or("shader_facts.tsv: bad row")?;
+            facts.insert(k.to_string(), Json::parse(j).map_err(|e| format!("shader_facts.tsv {k}: {e}"))?);
+        }
+    }
+    let mut handles = std::collections::BTreeMap::new();
+    if let Ok(t) = std::fs::read_to_string(dir.join("android_shader_handles.tsv")) {
+        let hex = |s: &str| u32::from_str_radix(s.trim_start_matches("0x"), 16).map_err(|_| format!("android_shader_handles.tsv: bad number {s}"));
+        for l in t.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
+            let f: Vec<&str> = l.split('\t').collect();
+            if f.len() < 4 {
+                return Err("android_shader_handles.tsv: bad row".into());
+            }
+            handles.insert(f[0].to_string(), (hex(f[1])?, hex(f[2])?, f[3].parse::<usize>().map_err(|_| "android_shader_handles.tsv: bad site count")?));
+        }
+    }
+    let work = game_dir.join("shaders.work");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let (index, skipped) = nx_shader::scan::scan_dir(&[(game_dir.join("RomFS"), "RomFS".to_string())], &work.join("spool.bin"), threads, &|d, t| progress("scanning", d, t))?;
+    let params = nx_shader::pipeline::Params {
+        xlate,
+        work: work.join("xlate"),
+        threads,
+        chunk: 64,
+        subgroup: g.get("android_subgroup_size").and_then(|v| v.trim().parse().ok()).unwrap_or(128),
+        dynamic_slots: matches!(g.get("android_dynamic_slots").as_deref().map(str::trim), Some("on" | "1" | "true" | "yes")),
+        facts,
+        handles,
+    };
+    let out = game_dir.join("shaders.dmsv");
+    let rep = nx_shader::pipeline::build(&index, &params, &out, progress)?;
+    let _ = std::fs::remove_dir_all(&work);
+    if !rep.failed.is_empty() {
+        let first: Vec<String> = rep.failed.iter().take(3).map(|(k, e)| format!("{k:016x}: {e}")).collect();
+        return Err(format!("{} of {} shaders failed; {}", rep.failed.len(), rep.expected.len(), first.join("; ")));
+    }
+    Ok(format!("{} shaders ({} unreadable files)", rep.emitted, skipped.len()))
+}
+
 /// The games list as JSON (`{"games":[...]}`) or `{"error":"..."}`. `overlay` is the text of upstream's `overlay_default.tsv`, when the controls should be validated.
 pub fn games_json(profiles_dir: &str, overlay: &str, all: bool) -> String {
     let controls = (!overlay.is_empty()).then(|| nx_profile::overlay_controls(overlay));

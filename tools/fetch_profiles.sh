@@ -16,7 +16,7 @@ for d in "$src"/nxnative/dm/games/*/; do
   [ -f "${d}game.tsv" ] || continue
   id=$(basename "$d")
   mkdir -p "$dst/$id"
-  for f in game.tsv android.tsv; do
+  for f in game.tsv android.tsv shader_facts.tsv android_shader_handles.tsv; do
     [ -f "$d$f" ] && cp "$d$f" "$dst/$id/$f"
   done
 done

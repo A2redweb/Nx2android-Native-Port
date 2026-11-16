@@ -17,5 +17,14 @@ cp "$src"/nxnative/dm/android/java/org/nx2a/*.java android/app/src/upstream-java
 # the universal host
 ANDROID_NDK_HOME=${HOST_NDK:?set HOST_NDK to NDK r27c} sh tools/build_universal_host.sh "$src" "${TMPDIR:-/tmp}/uw"
 cp "${TMPDIR:-/tmp}/uw/out/libdmhost.so" android/app/src/main/jniLibs/arm64-v8a/
+# the shader translator, NativeAOT for bionic (UNPROVEN, see docs/SPIKE_DOTNET.md): shipped as an executable named like a library so Android extracts it to nativeLibraryDir, where the app may run it.
+# A build without dotnet or one that fails leaves it out; the app then says so instead of building shaders.
+if command -v dotnet >/dev/null 2>&1; then
+  if ANDROID_NDK_HOME=${ANDROID_NDK_HOME:?} bash tools/make_bionic_tools.sh "$src" "${TMPDIR:-/tmp}/bt"; then
+    cp "${TMPDIR:-/tmp}/bt/dmsh_xlate/dmsh_xlate" android/app/src/main/jniLibs/arm64-v8a/libdmsh_xlate.so
+  else
+    echo "WARNING: dmsh_xlate for bionic did not build; this APK cannot build shaders" >&2
+  fi
+fi
 cd android && gradle --no-daemon assembleDebug
 echo "APK: $here/android/app/build/outputs/apk/debug/app-debug.apk"

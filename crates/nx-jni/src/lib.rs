@@ -103,3 +103,14 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeRewrite(env: J
         Err(e) => format!("error: {e}"),
     })
 }
+
+/// Builds `shaders.dmsv` of the game's data folder. `xlate` is the translator executable; `threads` the parallel translator processes. Returns "ok: <summary>" or "error: <message>".
+#[no_mangle]
+pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeBuildShaders(env: JNIEnv, _c: JClass, profiles: JString, id: JString, dir: JString, xlate: JString, threads: i32) -> JString {
+    let (profiles, id, dir, xlate) = (get(env, profiles), get(env, id), get(env, dir), get(env, xlate));
+    let r = nx_core::build_shaders(std::path::Path::new(&profiles), &id, std::path::Path::new(&dir), vec![xlate], threads.max(1) as usize, &|_, _, _| {});
+    make(env, &match r {
+        Ok(s) => format!("ok: {s}"),
+        Err(e) => format!("error: {e}"),
+    })
+}

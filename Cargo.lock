@@ -19,6 +19,7 @@ dependencies = [
  "nx-nso",
  "nx-profile",
  "nx-rewrite",
+ "nx-shader",
 ]
 
 [[package]]

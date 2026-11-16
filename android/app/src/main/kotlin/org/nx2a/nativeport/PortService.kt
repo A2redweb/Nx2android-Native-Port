@@ -85,6 +85,12 @@ class PortService : Service() {
         val rw = Core.nativeRewrite(File(filesDir, "games").path, id, dst.path)
         File(dst, "rewrite.txt").writeText(rw + "\n")
         android.util.Log.i("nx2a", "rewrite: $rw")
+        File(dst, "shaders.dmsv").delete()
+        val xlate = File(applicationInfo.nativeLibraryDir, "libdmsh_xlate.so")
+        val sh = if (xlate.isFile) Core.nativeBuildShaders(File(filesDir, "games").path, id, dst.path, xlate.path, Runtime.getRuntime().availableProcessors().coerceIn(1, 4))
+                 else "error: the shader translator is not part of this build"
+        File(dst, "shaders.txt").writeText(sh + "\n")
+        android.util.Log.i("nx2a", "shaders: $sh")
     }
 
     private fun stemOf(out: File) = out.name

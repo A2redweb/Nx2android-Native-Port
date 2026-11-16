@@ -15,4 +15,5 @@ object Core {
     external fun nativePrepare(profiles: String, id: String, dir: String, language: String): String
     /** Rewrites the game's code into its mods/ folder (minutes for a big game). Returns "ok: ..." or "error: ...". */
     external fun nativeRewrite(profiles: String, id: String, dir: String): String
+    external fun nativeBuildShaders(profiles: String, id: String, dir: String, xlate: String, threads: Int): String
 }
