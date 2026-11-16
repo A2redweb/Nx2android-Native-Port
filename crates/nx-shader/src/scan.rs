@@ -98,7 +98,7 @@ pub fn scan_dir(roots: &[(PathBuf, String)], common: Option<HashMap<u32, String>
             sc.spawn(move || loop {
                 let i = next.fetch_add(1, Ordering::Relaxed);
                 let Some((path, label)) = files.get(i) else { break };
-                let r = std::fs::read(path).map_err(|e| e.to_string()).and_then(|d| {
+                let r = crate::container::load_file(path).and_then(|d| {
                     let (mut out, mut u) = (vec![], UnityState { common: common.clone(), trees: Trees::new(), borrowed: false, dicts: dicts.clone() });
                     scan_file_with(&d, label, &mut out, &mut u).map(|defer| (out, u.trees, defer))
                 });
@@ -143,7 +143,7 @@ pub fn scan_dir(roots: &[(PathBuf, String)], common: Option<HashMap<u32, String>
                         let i = next.fetch_add(1, Ordering::Relaxed);
                         let Some(&fi) = deferred.get(i) else { break };
                         let (path, label) = &files[fi];
-                        let r = std::fs::read(path).map_err(|e| e.to_string()).and_then(|d| {
+                        let r = crate::container::load_file(path).and_then(|d| {
                             let (mut out, mut u) = (vec![], UnityState { common: common.clone(), trees: trees.clone(), borrowed: true, dicts: dicts.clone() });
                             scan_file_with(&d, label, &mut out, &mut u).map(|defer| (out, u.trees, defer))
                         });

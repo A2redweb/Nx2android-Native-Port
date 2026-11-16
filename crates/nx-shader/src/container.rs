@@ -112,6 +112,62 @@ pub fn zs_dicts(romfs: &std::path::Path) -> Result<Vec<std::sync::Arc<nx_zstd::D
     Ok(out)
 }
 
+/// A file's bytes: read into memory when small, mapped read-only when large (a game's asset archive can be several GB, more than the phone has free; mapped pages are clean and the system takes them back)
+pub enum FileBytes {
+    Owned(Vec<u8>),
+    #[cfg(unix)]
+    Mapped(*mut u8, usize),
+}
+
+// the mapping is read-only and private to this value
+unsafe impl Send for FileBytes {}
+unsafe impl Sync for FileBytes {}
+
+#[cfg(unix)]
+extern "C" {
+    fn mmap(addr: *mut u8, len: usize, prot: i32, flags: i32, fd: i32, off: i64) -> *mut u8;
+    fn munmap(addr: *mut u8, len: usize) -> i32;
+}
+
+impl std::ops::Deref for FileBytes {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            FileBytes::Owned(v) => v,
+            #[cfg(unix)]
+            FileBytes::Mapped(p, n) => unsafe { std::slice::from_raw_parts(*p, *n) },
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for FileBytes {
+    fn drop(&mut self) {
+        if let FileBytes::Mapped(p, n) = self {
+            unsafe { munmap(*p, *n) };
+        }
+    }
+}
+
+/// files from this size up are mapped, not read
+pub const MAP_FROM: u64 = 256 << 20;
+
+pub fn load_file(path: &std::path::Path) -> Result<FileBytes, String> {
+    let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let n = f.metadata().map_err(|e| e.to_string())?.len();
+    #[cfg(unix)]
+    if n >= MAP_FROM {
+        use std::os::fd::AsRawFd;
+        // PROT_READ = 1, MAP_PRIVATE = 2 (the same on Linux and Android)
+        let p = unsafe { mmap(std::ptr::null_mut(), n as usize, 1, 2, f.as_raw_fd(), 0) };
+        if p as isize == -1 {
+            return Err(format!("{}: cannot map {n} bytes", path.display()));
+        }
+        return Ok(FileBytes::Mapped(p, n as usize));
+    }
+    std::fs::read(path).map(FileBytes::Owned).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 pub const LZ4_FRAME_MAGIC: [u8; 4] = [0x04, 0x22, 0x4D, 0x18];
 
 /// The decompressed size a zstd or LZ4 frame header gives, or None when it gives none
@@ -302,5 +358,25 @@ mod tests {
         let (z, raw) = (&include_bytes!("../../nx-zstd/tests/dict/dict_1.zst")[..], &include_bytes!("../../nx-zstd/tests/dict/dict_1.raw")[..]);
         assert_eq!(unzs_with(z, &[dict]).unwrap(), raw);
         assert!(unzs(z).unwrap_err().contains("needs dictionary"));
+    }
+
+    #[test]
+    fn large_files_can_be_mapped() {
+        let p = std::env::temp_dir().join(format!("nxmap-{}", std::process::id()));
+        std::fs::write(&p, b"BNSH\0\0\0\0 some bytes").unwrap();
+        assert!(matches!(load_file(&p).unwrap(), FileBytes::Owned(_)));
+        // the mapped variant, forced: map the same file by hand
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            let f = std::fs::File::open(&p).unwrap();
+            let n = f.metadata().unwrap().len() as usize;
+            let m = unsafe { mmap(std::ptr::null_mut(), n, 1, 2, f.as_raw_fd(), 0) };
+            assert_ne!(m as isize, -1);
+            let fb = FileBytes::Mapped(m, n);
+            assert_eq!(&fb[..4], b"BNSH");
+            assert_eq!(fb.len(), n);
+        }
+        let _ = std::fs::remove_file(&p);
     }
 }
