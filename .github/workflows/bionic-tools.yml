@@ -17,7 +17,7 @@ jobs:
         run: |
           mkdir -p /tmp/up && curl -fsSL "https://codeload.github.com/shirai91/nx2android/tar.gz/${{ inputs.upstream }}" | tar -xz -C /tmp/up --strip-components=1
           echo "KEY=$(python3 tools/prebuilt_key.py /tmp/up)" >> "$GITHUB_ENV"
-      - name: Build both tools for linux-bionic-arm64
+      - name: Build the translator for linux-bionic-arm64
         run: bash tools/make_bionic_tools.sh /tmp/up /tmp/out
       - uses: actions/upload-artifact@v4
         with: { name: 'bionic-tools-${{ env.KEY }}', path: /tmp/out }
