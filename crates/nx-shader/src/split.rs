@@ -112,6 +112,98 @@ pub fn check(st: Stage, ctl: &[u8], code: &[u8]) -> Option<&'static str> {
     None
 }
 
+/// A GLSLC output's stage, from its code area's header (graphics: the SPH's stage bits), or compute when the code has no header and the control's thread group (+0x748) is filled
+fn glslc_stage(ctl: &[u8], code: &[u8]) -> Option<Stage> {
+    let m = code.get(..4);
+    let headerless_cs = m != Some(&CS_MAGIC[..]) && m != Some(&GFX_MAGIC[..]) && ctl.len() >= 0x754 && (0..3).all(|i| u32le(ctl, 0x748 + 4 * i).is_ok_and(|v| v != 0));
+    if m == Some(&CS_MAGIC[..]) || headerless_cs {
+        Some(Stage::Cs)
+    } else if m == Some(&GFX_MAGIC[..]) && code.len() >= 0x34 {
+        sph_stage(code)
+    } else {
+        None
+    }
+}
+
+/// The GPU code sections of the GLSLC output at `h` (section count at +0x4c, headers of 0x90 bytes from +0x90: {size, data offset, type (0 = GPU code)}, a GPU code header adds +0x30 control offset, +0x34 code offset, +0x38 code length, +0x3c control length)
+fn glslc_section(d: &[u8], h: usize, size: usize) -> Option<Vec<(Vec<u8>, Vec<u8>)>> {
+    let n = u32le(d, h + 0x4c).ok()? as usize;
+    if n == 0 || n > 16 || h + 0x90 * (n + 1) > d.len() {
+        return None;
+    }
+    let mut secs = vec![];
+    for i in 0..n {
+        let s = h + 0x90 + 0x90 * i;
+        let (ssz, soff, typ) = (u32le(d, s).ok()? as usize, u32le(d, s + 4).ok()? as usize, u32le(d, s + 8).ok()?);
+        if typ != 0 {
+            continue;
+        }
+        let (co, ko, kn, cn) = (u32le(d, s + 0x30).ok()? as usize, u32le(d, s + 0x34).ok()? as usize, u32le(d, s + 0x38).ok()? as usize, u32le(d, s + 0x3c).ok()? as usize);
+        if soff + ssz > size || co + cn > ssz || ko + kn > ssz {
+            return None;
+        }
+        let b = h + soff;
+        secs.push((d.get(b + co..b + co + cn)?.to_vec(), d.get(b + ko..b + ko + kn)?.to_vec()));
+    }
+    Some(secs)
+}
+
+/// GLSLC compiler outputs (magic 0x19866891, +0x44 the whole output's length): one stage each (a control section with the code area right after it) or several compiled as one program, read by section headers.
+/// Only outputs that pass the control / code consistency check are kept: the magic is just 4 bytes.
+pub fn glslc_shaders(d: &[u8], label: &str) -> Vec<Found> {
+    let mut out = vec![];
+    for h in find_all(d, &[0x91, 0x68, 0x86, 0x19]) {
+        if h + 0x48 > d.len() {
+            continue;
+        }
+        let Ok(size) = u32le(d, h + 0x44).map(|v| v as usize) else { continue };
+        if !(size > 0x760 && size <= d.len() - h) {
+            continue;
+        }
+        let Some(c) = find_all(&d[h..h + size], &CTL_MAGIC).next().map(|x| h + x) else { continue };
+        if find_all(&d[c + 4..h + size], &CTL_MAGIC).next().is_some() {
+            // several stages: every GPU code section, each stage once
+            let secs = glslc_section(d, h, size).unwrap_or_default();
+            let sts: Vec<Option<Stage>> = secs.iter().map(|(c, k)| glslc_stage(c, k)).collect();
+            let distinct: std::collections::BTreeSet<_> = sts.iter().collect();
+            if secs.len() < 2 || distinct.len() < sts.len() || sts.iter().zip(&secs).any(|(st, (c, k))| st.is_none_or(|st| check(st, c, k).is_some())) {
+                continue;
+            }
+            for (st, (c, k)) in sts.into_iter().zip(secs) {
+                out.push(Found { label: format!("{label}#GLSLC@{h:#x}#var"), stage: st.unwrap(), ctl: c, code: k });
+            }
+            continue;
+        }
+        if c + 0x708 > d.len() {
+            continue;
+        }
+        let (Ok(nctl), Ok(ncode)) = (u32le(d, c + 0x20), u32le(d, c + 0x704)) else { continue };
+        let (nctl, ncode) = (nctl as usize, ncode as usize);
+        let direct = (|| {
+            if nctl < 0x760 || nctl & 3 != 0 || c + nctl + ncode > h + size {
+                return None;
+            }
+            let (ctl, code) = (d.get(c..c + nctl)?.to_vec(), d.get(c + nctl..c + nctl + ncode)?.to_vec());
+            let st = glslc_stage(&ctl, &code)?;
+            check(st, &ctl, &code).is_none().then_some((st, ctl, code))
+        })();
+        let found = direct.or_else(|| {
+            // SDK 4's GLSLC writes control sections whose +0x20 is short of their length: the section header says where both are
+            let sec = glslc_section(d, h, size)?;
+            if sec.len() != 1 {
+                return None;
+            }
+            let (ctl, code) = sec.into_iter().next()?;
+            let st = glslc_stage(&ctl, &code)?;
+            check(st, &ctl, &code).is_none().then_some((st, ctl, code))
+        });
+        if let Some((st, ctl, code)) = found {
+            out.push(Found { label: format!("{label}#GLSLC@{h:#x}"), stage: st, ctl, code });
+        }
+    }
+    out
+}
+
 pub fn bnsh_shaders(d: &[u8], base: usize, label: &str) -> Result<Vec<Found>, String> {
     if d.get(base + 0x60..base + 0x64) != Some(b"grsc") {
         return Err(format!("{label} BNSH @{base:#x} has no grsc block"));
@@ -209,6 +301,7 @@ pub fn scan_blob(d: &[u8], label: &str, out: &mut Vec<Found>) -> Result<(), Stri
             out.extend(bnsh_shaders(d, p, label)?);
         }
     }
+    out.extend(glslc_shaders(d, label));
     Ok(())
 }
 
@@ -217,7 +310,7 @@ pub fn scan_file(bytes: &[u8], label: &str, out: &mut Vec<Found>) -> Result<(), 
     if bytes.get(..4) == Some(&ZSTD_MAGIC[..]) {
         return scan_blob(&unzs(bytes)?, label, out);
     }
-    let interesting = bytes.get(..4).is_some_and(|m| matches!(m, b"Yaz0" | b"SARC" | b"BAHS")) || find_all(bytes, b"BNSH\0\0\0\0").next().is_some();
+    let interesting = bytes.get(..4).is_some_and(|m| matches!(m, b"Yaz0" | b"SARC" | b"BAHS")) || find_all(bytes, b"BNSH\0\0\0\0").next().is_some() || find_all(bytes, &[0x91, 0x68, 0x86, 0x19]).next().is_some();
     if interesting {
         scan_blob(bytes, label, out)?;
     }
@@ -307,10 +400,43 @@ mod tests {
         let k = skey(&ctl, b"x");
         assert_eq!(format!("{k:016x}"), "99c3ed278ecd8e49");
     }
+
+    #[test]
+    fn glslc_output_of_one_stage_is_found_inside_other_bytes() {
+        let nctl = 0x880usize;
+        let mut ctl = vec![0u8; nctl];
+        ctl[..4].copy_from_slice(&CTL_MAGIC);
+        ctl[0x20..0x24].copy_from_slice(&(nctl as u32).to_le_bytes());
+        let mut code = vec![0u8; 0x100];
+        code[..4].copy_from_slice(&GFX_MAGIC);
+        code[0x30..0x34].copy_from_slice(&(5u32 << 10).to_le_bytes()); // pixel
+        ctl[0x704..0x708].copy_from_slice(&(code.len() as u32).to_le_bytes());
+        let mut blob = vec![0xAAu8; 0x33];
+        let h = blob.len();
+        let mut out = vec![0u8; 0x48];
+        out[..4].copy_from_slice(&[0x91, 0x68, 0x86, 0x19]);
+        out[0x44..0x48].copy_from_slice(&((0x48 + nctl + code.len()) as u32).to_le_bytes());
+        out.extend(&ctl);
+        out.extend(&code);
+        blob.extend(&out);
+        blob.extend([0x55u8; 9]);
+        let mut found = vec![];
+        scan_file(&blob, "main", &mut found).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].stage, &found[0].ctl, &found[0].code), (Stage::Ps, &ctl, &code));
+        assert_eq!(found[0].label, format!("main#GLSLC@{h:#x}"));
+        // a code area whose length disagrees with the control is not a shader
+        let mut bad = blob.clone();
+        bad[h + 0x48 + 0x704] ^= 1;
+        let mut none = vec![];
+        scan_file(&bad, "main", &mut none).unwrap();
+        assert!(none.is_empty());
+    }
 }
 
 /// A synthetic BNSH for the tests of this crate: (the file, vertex control, vertex code, pixel code)
 #[cfg(test)]
 pub fn tests_fake_bnsh() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     tests::fake_bnsh()
+
 }

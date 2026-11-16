@@ -132,7 +132,15 @@ pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<Stri
     let work = game_dir.join("shaders.work");
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
-    let (index, skipped) = nx_shader::scan::scan_dir(&[(game_dir.join("RomFS"), "RomFS".to_string())], &work.join("spool.bin"), threads, &|d, t| progress("scanning", d, t))?;
+    // main's memory image holds shaders too (embedded BNSH, GLSLC outputs); scanned like a file
+    let img_dir = work.join("images");
+    std::fs::create_dir_all(&img_dir).map_err(|e| e.to_string())?;
+    if let Ok(bytes) = std::fs::read(game_dir.join("ExeFS").join("main")) {
+        let nso = nx_nso::Nso::parse(&bytes).map_err(|e| format!("main: {e}"))?;
+        std::fs::write(img_dir.join("main"), nso.image(&bytes).map_err(|e| format!("main: {e}"))?).map_err(|e| e.to_string())?;
+    }
+    let roots = [(img_dir, "".to_string()), (game_dir.join("RomFS"), "RomFS".to_string())];
+    let (index, skipped) = nx_shader::scan::scan_dir(&roots, &work.join("spool.bin"), threads, &|d, t| progress("scanning", d, t))?;
     let params = nx_shader::pipeline::Params {
         xlate,
         work: work.join("xlate"),
