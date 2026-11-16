@@ -74,7 +74,7 @@ impl Merger {
 
 /// Scans every file under `root` (labels are paths relative to it, `/`-separated, prefixed by `prefix`) on `threads` threads. Results are merged in file order, so the same input gives the same index.
 /// A file that fails to read as a container is reported in `skipped` and left out; a shader that contradicts an earlier one with its key stops the scan.
-pub fn scan_dir(roots: &[(PathBuf, String)], common: Option<HashMap<u32, String>>, spool: &Path, threads: usize, progress: &(dyn Fn(usize, usize) + Sync)) -> Result<(Index, Vec<(String, String)>), String> {
+pub fn scan_dir(roots: &[(PathBuf, String)], common: Option<HashMap<u32, String>>, dicts: crate::container::Dicts, spool: &Path, threads: usize, progress: &(dyn Fn(usize, usize) + Sync)) -> Result<(Index, Vec<(String, String)>), String> {
     let common = common.map(Arc::new);
     let mut files: Vec<(PathBuf, String)> = vec![];
     for (root, prefix) in roots {
@@ -94,12 +94,12 @@ pub fn scan_dir(roots: &[(PathBuf, String)], common: Option<HashMap<u32, String>
     let mut skipped = vec![];
     std::thread::scope(|sc| -> Result<(), String> {
         for _ in 0..threads.max(1) {
-            let (tx, next, files, common) = (tx.clone(), next.clone(), files.clone(), common.clone());
+            let (tx, next, files, common, dicts) = (tx.clone(), next.clone(), files.clone(), common.clone(), dicts.clone());
             sc.spawn(move || loop {
                 let i = next.fetch_add(1, Ordering::Relaxed);
                 let Some((path, label)) = files.get(i) else { break };
                 let r = std::fs::read(path).map_err(|e| e.to_string()).and_then(|d| {
-                    let (mut out, mut u) = (vec![], UnityState { common: common.clone(), trees: Trees::new(), borrowed: false });
+                    let (mut out, mut u) = (vec![], UnityState { common: common.clone(), trees: Trees::new(), borrowed: false, dicts: dicts.clone() });
                     scan_file_with(&d, label, &mut out, &mut u).map(|defer| (out, u.trees, defer))
                 });
                 if tx.send((i, r)).is_err() {
@@ -144,7 +144,7 @@ pub fn scan_dir(roots: &[(PathBuf, String)], common: Option<HashMap<u32, String>
                         let Some(&fi) = deferred.get(i) else { break };
                         let (path, label) = &files[fi];
                         let r = std::fs::read(path).map_err(|e| e.to_string()).and_then(|d| {
-                            let (mut out, mut u) = (vec![], UnityState { common: common.clone(), trees: trees.clone(), borrowed: true });
+                            let (mut out, mut u) = (vec![], UnityState { common: common.clone(), trees: trees.clone(), borrowed: true, dicts: dicts.clone() });
                             scan_file_with(&d, label, &mut out, &mut u).map(|defer| (out, u.trees, defer))
                         });
                         *results[i].lock().unwrap() = Some(r);
@@ -182,7 +182,7 @@ mod tests {
         std::fs::write(root.join("sub/copy.bfsha"), &bnsh).unwrap(); // the same shaders again: one entry each
         std::fs::write(root.join("sub/other.bin"), b"nothing here").unwrap();
         let spool = root.join("spool");
-        let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], None, &spool, 3, &|_, _| {}).unwrap();
+        let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], None, Default::default(), &spool, 3, &|_, _| {}).unwrap();
         assert!(skipped.is_empty(), "{skipped:?}");
         assert_eq!(idx.ents.len(), 2);
         let k = skey(&vctl, &vcode);
@@ -200,13 +200,13 @@ mod tests {
         // 'a' sorts first and has no tree of its own, 'b' brings the tree
         std::fs::write(root.join("a.assets"), crate::unity::tests_serialized(false)).unwrap();
         std::fs::write(root.join("b.assets"), crate::unity::tests_serialized(true)).unwrap();
-        let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], Some(HashMap::new()), &root.join("spool"), 2, &|_, _| {}).unwrap();
+        let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], Some(HashMap::new()), Default::default(), &root.join("spool"), 2, &|_, _| {}).unwrap();
         assert!(skipped.is_empty(), "{skipped:?}");
         assert_eq!(idx.ents.len(), 2);
         assert!(idx.ents.values().all(|e| e.label.starts_with("/b.assets#")), "the keys come from the file read first, which is b: a was deferred");
         // without b nothing lends a tree: a is reported, not guessed at
         std::fs::remove_file(root.join("b.assets")).unwrap();
-        let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], Some(HashMap::new()), &root.join("spool"), 2, &|_, _| {}).unwrap();
+        let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], Some(HashMap::new()), Default::default(), &root.join("spool"), 2, &|_, _| {}).unwrap();
         assert_eq!((idx.ents.len(), skipped.len()), (0, 1));
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -311,11 +311,13 @@ pub struct UnityState {
     pub trees: crate::unity::Trees,
     /// the second pass: trees are borrowed, and a ComputeShader without one is left out
     pub borrowed: bool,
+    /// zstd dictionaries the game's files name
+    pub dicts: Dicts,
 }
 
 impl UnityState {
     pub fn none() -> Self {
-        UnityState { common: None, trees: Default::default(), borrowed: false }
+        UnityState { common: None, trees: Default::default(), borrowed: false, dicts: Default::default() }
     }
 }
 
@@ -324,8 +326,13 @@ pub fn scan_file_with(bytes: &[u8], label: &str, out: &mut Vec<Found>, u: &mut U
     let owned;
     let mut bytes = bytes;
     if bytes.get(..4) == Some(&ZSTD_MAGIC[..]) {
-        owned = unzs(bytes)?;
+        owned = unzs_with(bytes, &u.dicts)?;
         bytes = &owned;
+    }
+    let sized;
+    if bytes.get(..4) != Some(&ZSTD_MAGIC[..]) && bytes.get(4..8).is_some_and(|m| m == ZSTD_MAGIC || m == LZ4_FRAME_MAGIC) {
+        sized = size_prefixed(bytes, &u.dicts).0; // a size-prefixed frame (Kirby and the Forgotten Land's .cmp files); one that is not is scanned as it is
+        bytes = &sized;
     }
     let yaz;
     if bytes.get(..4) == Some(b"Yaz0") {

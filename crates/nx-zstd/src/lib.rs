@@ -1,7 +1,7 @@
 //! A Zstandard decoder (RFC 8878) in plain Rust, for NSZ / XCZ dumps. Streaming: the input is read block by block, the output goes to a writer, and only the last `window` bytes are kept.
 //!
 //! Supported: all block types, raw / RLE / Huffman literals (one or four streams, repeated trees), predefined / RLE / FSE / repeated sequence tables, repeat offsets, multiple frames,
-//! skippable frames. Not supported: dictionaries. The content checksum is skipped, not verified (NCZ files are checked against the NCA's SHA-256 afterwards).
+//! skippable frames, trained dictionaries (`Dictionary`). The content checksum is skipped, not verified (NCZ files are checked against the NCA's SHA-256 afterwards).
 //! Checked against the output of libzstd for several levels and data kinds (tests/data), plus corrupt inputs that must give errors, never panics.
 
 use std::io::{self, Read, Write};
@@ -361,7 +361,49 @@ const OF_DEFAULT: [i32; 29] = [1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1
 
 // ---------------------------------------------------------------- decoder
 
+/// A trained zstd dictionary (magic 0xEC30A437, an ID, the entropy tables, the repeat offsets, then content that frames may refer back to)
+#[derive(Clone)]
+pub struct Dictionary {
+    id: u32,
+    huff: Huff,
+    of: Fse,
+    ml: Fse,
+    ll: Fse,
+    rep: [u32; 3],
+    content: Vec<u8>,
+}
+
+impl Dictionary {
+    pub fn parse(d: &[u8]) -> io::Result<Dictionary> {
+        if d.get(..4) != Some(&[0x37, 0xA4, 0x30, 0xEC][..]) {
+            return Err(bad("not a trained dictionary"));
+        }
+        let id = u32::from_le_bytes(d.get(4..8).ok_or_else(|| bad("dictionary is cut short"))?.try_into().unwrap());
+        let mut at = 8;
+        let (huff, n) = read_huff(&d[at..])?;
+        at += n;
+        let mut table = |max_sym: usize, max_al: u32| -> R<Fse> {
+            let (probs, al, n) = read_counts(d.get(at..).ok_or_else(|| bad("dictionary is cut short"))?, max_sym, max_al)?;
+            at += n;
+            build_fse(&probs, al)
+        };
+        let of = table(31, 8)?;
+        let ml = table(52, 9)?;
+        let ll = table(35, 9)?;
+        let r = d.get(at..at + 12).ok_or_else(|| bad("dictionary is cut short"))?;
+        let rep = [u32::from_le_bytes(r[0..4].try_into().unwrap()), u32::from_le_bytes(r[4..8].try_into().unwrap()), u32::from_le_bytes(r[8..12].try_into().unwrap())];
+        if rep.contains(&0) {
+            return Err(bad("dictionary has a zero repeat offset"));
+        }
+        Ok(Dictionary { id, huff, of, ml, ll, rep, content: d[at + 12..].to_vec() })
+    }
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+}
+
 pub struct Decoder {
+    dicts: Vec<std::sync::Arc<Dictionary>>,
     hist: Vec<u8>,
     flushed: usize,
     window: usize,
@@ -374,7 +416,7 @@ pub struct Decoder {
 
 impl Default for Decoder {
     fn default() -> Self {
-        Decoder { hist: Vec::new(), flushed: 0, window: 0, huff: None, ll: None, of: None, ml: None, rep: [1, 4, 8] }
+        Decoder { dicts: Vec::new(), hist: Vec::new(), flushed: 0, window: 0, huff: None, ll: None, of: None, ml: None, rep: [1, 4, 8] }
     }
 }
 
@@ -402,6 +444,12 @@ fn fse_for(mode: u8, d: &[u8], at: &mut usize, default: &[i32], default_al: u32,
 }
 
 impl Decoder {
+    /// Makes frames that name this dictionary's ID decodable
+    pub fn add_dictionary(&mut self, d: std::sync::Arc<Dictionary>) {
+        self.dicts.retain(|x| x.id != d.id);
+        self.dicts.push(d);
+    }
+
     fn new_frame(&mut self, window: usize) {
         self.window = window;
         self.huff = None;
@@ -644,9 +692,8 @@ impl Decoder {
         let dict_len = [0, 1, 2, 4][dict as usize];
         let mut dd = [0u8; 4];
         r.read_exact(&mut dd[..dict_len])?;
-        if dd.iter().any(|&b| b != 0) {
-            return Err(bad("dictionaries are not supported"));
-        }
+        let dict_id = u32::from_le_bytes(dd);
+        let dict = if dict_id == 0 { None } else { Some(self.dicts.iter().find(|d| d.id == dict_id).cloned().ok_or_else(|| bad(&format!("a frame needs dictionary {dict_id}")))?) };
         let fcs_len = match fcs_flag {
             0 => single as usize,
             1 => 2,
@@ -668,6 +715,16 @@ impl Decoder {
         self.new_frame(window.max(1) as usize);
         self.hist.clear();
         self.flushed = 0;
+        if let Some(d) = dict {
+            // the dictionary's tables are the ones a "repeat" mode refers to in the first block; its content is history the frame may copy from
+            self.huff = Some(d.huff.clone());
+            self.ll = Some(d.ll.clone());
+            self.of = Some(d.of.clone());
+            self.ml = Some(d.ml.clone());
+            self.rep = d.rep;
+            self.hist = d.content.clone();
+            self.flushed = self.hist.len();
+        }
         let mut written = 0u64;
         loop {
             let mut bh = [0u8; 3];
@@ -733,5 +790,16 @@ pub fn decompress<Rd: Read, W: Write>(r: &mut Rd, w: &mut W) -> io::Result<u64> 
 pub fn decompress_vec(d: &[u8]) -> io::Result<Vec<u8>> {
     let mut out = Vec::new();
     decompress(&mut &d[..], &mut out)?;
+    Ok(out)
+}
+
+/// Decodes all frames of `d`, which may name any of `dicts`.
+pub fn decompress_vec_with(d: &[u8], dicts: &[std::sync::Arc<Dictionary>]) -> io::Result<Vec<u8>> {
+    let mut dec = Decoder::default();
+    for x in dicts {
+        dec.add_dictionary(x.clone());
+    }
+    let mut out = Vec::new();
+    dec.decode(&mut &d[..], &mut out)?;
     Ok(out)
 }

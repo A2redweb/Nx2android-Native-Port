@@ -86,7 +86,144 @@ pub fn sarc_members(d: &[u8]) -> Result<Vec<(String, &[u8])>, String> {
 
 /// A zstd file decompressed (no dictionary: a frame that names one is an error until the decoder supports them).
 pub fn unzs(d: &[u8]) -> Result<Vec<u8>, String> {
-    nx_zstd::decompress_vec(d).map_err(|e| e.to_string())
+    unzs_with(d, &[])
+}
+
+pub type Dicts = std::sync::Arc<Vec<std::sync::Arc<nx_zstd::Dictionary>>>;
+
+/// A zstd file decompressed: a frame that names a dictionary takes it from `dicts` (Tears of the Kingdom's shader packages name ID 1), and is an error when it is not there.
+pub fn unzs_with(d: &[u8], dicts: &[std::sync::Arc<nx_zstd::Dictionary>]) -> Result<Vec<u8>, String> {
+    nx_zstd::decompress_vec_with(d, dicts).map_err(|e| e.to_string())
+}
+
+/// The zstd dictionaries a RomFS ships: `Pack/ZsDic.pack.zs`, a SARC (itself plain zstd) of .zsdic files. Empty when there is no such file
+pub fn zs_dicts(romfs: &std::path::Path) -> Result<Vec<std::sync::Arc<nx_zstd::Dictionary>>, String> {
+    let p = romfs.join("Pack/ZsDic.pack.zs");
+    if !p.is_file() {
+        return Ok(vec![]);
+    }
+    let d = unzs(&std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?)?;
+    let mut out = vec![];
+    for (_, m) in sarc_members(&d)? {
+        if m.get(..4) == Some(&[0x37, 0xA4, 0x30, 0xEC][..]) {
+            out.push(std::sync::Arc::new(nx_zstd::Dictionary::parse(m).map_err(|e| e.to_string())?));
+        }
+    }
+    Ok(out)
+}
+
+pub const LZ4_FRAME_MAGIC: [u8; 4] = [0x04, 0x22, 0x4D, 0x18];
+
+/// The decompressed size a zstd or LZ4 frame header gives, or None when it gives none
+pub fn frame_size(f: &[u8]) -> Option<u64> {
+    if f.len() < 6 {
+        return None;
+    }
+    if f[..4] == LZ4_FRAME_MAGIC {
+        return (f[4] & 8 != 0 && f.len() >= 14).then(|| u64::from_le_bytes(f[6..14].try_into().unwrap()));
+    }
+    let fhd = f[4];
+    let single = (fhd >> 5) & 1;
+    let width = [single as usize, 2, 4, 8][(fhd >> 6) as usize];
+    if width == 0 {
+        return None;
+    }
+    let at = 5 + (single == 0) as usize + [0, 1, 2, 4][(fhd & 3) as usize];
+    let b = f.get(at..at + width)?;
+    let mut v = [0u8; 8];
+    v[..width].copy_from_slice(b);
+    Some(u64::from_le_bytes(v) + if width == 2 { 256 } else { 0 })
+}
+
+/// One LZ4 block appended to `out`; matches may reach into what `out` already holds (linked blocks)
+fn lz4_block_into(src: &[u8], out: &mut Vec<u8>) -> Result<(), String> {
+    let (mut i, bad) = (0usize, || "lz4: block is damaged".to_string());
+    while i < src.len() {
+        let t = src[i];
+        i += 1;
+        let mut lit = (t >> 4) as usize;
+        if lit == 15 {
+            loop {
+                let b = *src.get(i).ok_or_else(bad)?;
+                i += 1;
+                lit += b as usize;
+                if b != 255 {
+                    break;
+                }
+            }
+        }
+        out.extend(src.get(i..i + lit).ok_or_else(bad)?);
+        i += lit;
+        if i >= src.len() {
+            break;
+        }
+        let dist = u16::from_le_bytes(src.get(i..i + 2).ok_or_else(bad)?.try_into().unwrap()) as usize;
+        i += 2;
+        let mut ml = (t & 15) as usize;
+        if ml == 15 {
+            loop {
+                let b = *src.get(i).ok_or_else(bad)?;
+                i += 1;
+                ml += b as usize;
+                if b != 255 {
+                    break;
+                }
+            }
+        }
+        ml += 4;
+        if dist == 0 || dist > out.len() {
+            return Err(bad());
+        }
+        for _ in 0..ml {
+            out.push(out[out.len() - dist]);
+        }
+    }
+    Ok(())
+}
+
+/// An LZ4 frame decompressed
+pub fn lz4_frame(d: &[u8]) -> Result<Vec<u8>, String> {
+    if d.get(..4) != Some(&LZ4_FRAME_MAGIC[..]) || d.len() < 7 {
+        return Err("lz4: not a frame".into());
+    }
+    let flg = d[4];
+    let mut p = 6 + if flg & 8 != 0 { 8 } else { 0 } + if flg & 1 != 0 { 4 } else { 0 } + 1;
+    let mut out = vec![];
+    loop {
+        let n = u32le(d, p)?;
+        p += 4;
+        if n == 0 {
+            break;
+        }
+        let len = (n & 0x7fff_ffff) as usize;
+        let b = d.get(p..p + len).ok_or("lz4: block is cut short")?;
+        if n & 0x8000_0000 != 0 {
+            out.extend(b);
+        } else {
+            lz4_block_into(b, &mut out)?;
+        }
+        p += len + if flg & 0x10 != 0 { 4 } else { 0 };
+        if out.len() > 1 << 31 {
+            return Err("lz4: implausible size".into());
+        }
+    }
+    Ok(out)
+}
+
+/// HAL's .cmp container (Kirby and the Forgotten Land): a u32 decompressed size, then one zstd or LZ4 frame. → the decompressed bytes, or `d` itself when it is not that:
+/// a frame header whose size differs from the prefix (Tears of the Kingdom's .quad files), a frame that fails or gives another size than the prefix. The second return says why it was left alone.
+pub fn size_prefixed(d: &[u8], dicts: &[std::sync::Arc<nx_zstd::Dictionary>]) -> (Vec<u8>, Option<String>) {
+    let (Some(p), Some(frame)) = (d.get(..4), d.get(4..)) else { return (d.to_vec(), None) };
+    let size = u32::from_le_bytes(p.try_into().unwrap()) as u64;
+    if !matches!(frame_size(frame), None) && frame_size(frame) != Some(size) {
+        return (d.to_vec(), None);
+    }
+    let r = if frame.get(..4) == Some(&LZ4_FRAME_MAGIC[..]) { lz4_frame(frame) } else { unzs_with(frame, dicts) };
+    match r {
+        Ok(out) if out.len() as u64 == size => (out, None),
+        Ok(out) => (d.to_vec(), Some(format!("{} bytes where the prefix gives {size}", out.len()))),
+        Err(e) => (d.to_vec(), Some(e)),
+    }
 }
 
 #[cfg(test)]
@@ -130,5 +267,40 @@ mod tests {
         let m = sarc_members(&d).unwrap();
         assert_eq!(m.len(), 1);
         assert_eq!((m[0].0.as_str(), m[0].1), ("a.bin", &b"xyz"[..]));
+    }
+
+    #[test]
+    fn sized_frames_and_cmp_containers() {
+        // an LZ4 frame of one literal-only block, with content size and a second, uncompressed block
+        let lit = b"hello hello hello ";
+        let mut blk = vec![0xF0, (lit.len() - 15) as u8]; // 15 + extra literals
+        blk.extend(lit);
+        let mut f = LZ4_FRAME_MAGIC.to_vec();
+        f.extend([0x68, 0x40]); // FLG: version 01, content size; BD
+        f.extend(((lit.len() + 3) as u64).to_le_bytes());
+        f.push(0);
+        f.extend((blk.len() as u32).to_le_bytes());
+        f.extend(&blk);
+        f.extend((3u32 | 0x8000_0000).to_le_bytes());
+        f.extend(b"end");
+        f.extend(0u32.to_le_bytes());
+        assert_eq!(frame_size(&f), Some(21));
+        let want = b"hello hello hello end";
+        assert_eq!(lz4_frame(&f).unwrap(), want);
+        let mut cmp = 21u32.to_le_bytes().to_vec();
+        cmp.extend(&f);
+        assert_eq!(size_prefixed(&cmp, &[]), (want.to_vec(), None));
+        // a prefix that disagrees with the frame's own size: left alone
+        let mut other = 99u32.to_le_bytes().to_vec();
+        other.extend(&f);
+        assert_eq!(size_prefixed(&other, &[]), (other.clone(), None));
+    }
+
+    #[test]
+    fn a_frame_that_names_a_dictionary_needs_it() {
+        let dict = std::sync::Arc::new(nx_zstd::Dictionary::parse(include_bytes!("../../nx-zstd/tests/dict/dict.bin")).unwrap());
+        let (z, raw) = (&include_bytes!("../../nx-zstd/tests/dict/dict_1.zst")[..], &include_bytes!("../../nx-zstd/tests/dict/dict_1.raw")[..]);
+        assert_eq!(unzs_with(z, &[dict]).unwrap(), raw);
+        assert!(unzs(z).unwrap_err().contains("needs dictionary"));
     }
 }

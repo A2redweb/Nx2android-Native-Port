@@ -143,7 +143,7 @@ pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<Stri
         std::fs::write(img_dir.join("main"), img).map_err(|e| e.to_string())?;
     }
     let roots = [(img_dir, "".to_string()), (game_dir.join("RomFS"), "RomFS".to_string())];
-    let (index, skipped) = nx_shader::scan::scan_dir(&roots, common, &work.join("spool.bin"), threads, &|d, t| progress("scanning", d, t))?;
+    let (index, skipped) = nx_shader::scan::scan_dir(&roots, common, std::sync::Arc::new(nx_shader::container::zs_dicts(&game_dir.join("RomFS"))?), &work.join("spool.bin"), threads, &|d, t| progress("scanning", d, t))?;
     let params = nx_shader::pipeline::Params {
         xlate,
         work: work.join("xlate"),

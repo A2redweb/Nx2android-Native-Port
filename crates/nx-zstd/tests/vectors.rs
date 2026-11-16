@@ -135,3 +135,17 @@ fn speed() {
         println!("{name}: {:.0} MB/s", total as f64 / 1048576.0 / t.elapsed().as_secs_f64());
     }
 }
+
+#[test]
+fn frames_with_a_trained_dictionary_decode_exactly() {
+    use nx_zstd::{decompress_vec_with, Dictionary};
+    let dict = std::sync::Arc::new(Dictionary::parse(&std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/dict/dict.bin")).unwrap()).unwrap());
+    assert_eq!(dict.id(), 1132947906);
+    for i in 0..3 {
+        let z = std::fs::read(format!("{}/tests/dict/dict_{i}.zst", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let raw = std::fs::read(format!("{}/tests/dict/dict_{i}.raw", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        assert_eq!(decompress_vec_with(&z, std::slice::from_ref(&dict)).unwrap(), raw, "frame {i}");
+        // without the dictionary the frame is refused, never guessed at
+        assert!(decompress_vec(&z).is_err());
+    }
+}
