@@ -312,6 +312,68 @@ pub fn int_inputs(spv: &[u8]) -> Result<BTreeMap<u32, bool>, String> {
     Ok(uses.into_iter().filter(|v| !other.contains(v)).filter_map(|v| loc.get(&v).map(|&l| (l, sint.contains(&v)))).collect())
 }
 
+/// A packed texture/sampler handle remapped at the stores that feed both array indices (`android_shader_handles.tsv`: a handle whose low 20 bits equal `source` is turned into `target`):
+/// every store of a packed handle becomes `select(value == 0xFFFFF-masked raw ...)`; see upstream's `remap_handles`. `expected`: the number of handles the table says the shader has.
+pub fn remap_handles(spv: &[u8], source: u32, target: u32, expected: usize) -> Result<Vec<u8>, String> {
+    let w: Vec<u32> = spv.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+    let (mut constants, mut loads, mut types): (HashMap<u32, u32>, HashMap<u32, (u32, u32)>, HashMap<u32, u32>) = Default::default();
+    let mut uses: HashMap<(u32, u32), BTreeSet<(u32, Option<u32>)>> = HashMap::new();
+    let mut bool_type = None;
+    let ins = instructions(spv)?;
+    for (op, a) in &ins {
+        let n = a.len();
+        match *op {
+            20 => bool_type = Some(get(a, 1)?),
+            21 if get(a, 2)? == 32 => {
+                types.insert(get(a, 1)?, get(a, 3)?);
+            }
+            43 if n == 4 => {
+                constants.insert(get(a, 2)?, a[3]);
+            }
+            61 => {
+                loads.insert(get(a, 2)?, (get(a, 3)?, get(a, 1)?));
+            }
+            194 | 199 if loads.contains_key(&get(a, 3)?) => {
+                let l = loads[&a[3]];
+                uses.entry(l).or_default().insert((*op, constants.get(&get(a, 4)?).copied()));
+            }
+            _ => {}
+        }
+    }
+    let handles: BTreeMap<u32, u32> = uses.iter().filter(|((_, t), ops)| types.contains_key(t) && ops.contains(&(194, Some(20))) && ops.contains(&(199, Some(0xFFFFF)))).map(|((p, t), _)| (*p, *t)).collect();
+    let uniq: BTreeSet<u32> = handles.values().copied().collect();
+    let (Some(bool_type), false, true, 1) = (bool_type, expected == 0, handles.len() == expected, uniq.len()) else {
+        return Err("packed handle shader interface changed".into());
+    };
+    let typ = *uniq.iter().next().unwrap();
+    let (raw, slot) = (w[3], w[3] + 1);
+    let mut out: Vec<u32> = w[..5].to_vec();
+    out[3] += 2;
+    let mut inserted = false;
+    let mut stores = vec![];
+    for (op, a) in &ins {
+        let mut a = a.clone();
+        if *op == 54 && !inserted {
+            out.extend([4 << 16 | 43, typ, raw, source, 4 << 16 | 43, typ, slot, target]);
+            inserted = true;
+        }
+        if *op == 62 && handles.contains_key(&get(&a, 1)?) {
+            stores.push(a[1]);
+            let (cond, value) = (out[3], out[3] + 1);
+            out[3] += 2;
+            out.extend([5 << 16 | 170, bool_type, cond, get(&a, 2)?, raw]);
+            out.extend([6 << 16 | 169, typ, value, cond, slot, a[2]]);
+            a[2] = value;
+        }
+        out.extend(a);
+    }
+    stores.sort_unstable();
+    if stores != handles.keys().copied().collect::<Vec<_>>() {
+        return Err("expected one assignment per packed handle".into());
+    }
+    Ok(out.iter().flat_map(|w| w.to_le_bytes()).collect())
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -377,6 +439,28 @@ pub mod tests {
             a.op(128, &[15, 18, 16, 16]); // OpIAdd uses the load directly
         }
         a.bytes()
+    }
+
+    /// a module whose handle variable (id 6) is loaded, shifted by 20, masked with 0xfffff, and stored once
+    pub fn packed_handle() -> Vec<u8> {
+        let mut a = Asm::new(20);
+        a.op(21, &[1, 32, 0]).op(20, &[2]).op(OP_CONSTANT, &[1, 3, 20]).op(OP_CONSTANT, &[1, 4, 0xFFFFF]);
+        a.op(OP_TYPE_POINTER, &[5, 6, 1]).op(OP_VARIABLE, &[5, 6, 6]);
+        a.op(54, &[0, 11, 0, 12]);
+        a.op(61, &[1, 7, 6]).op(194, &[1, 8, 7, 3]).op(199, &[1, 9, 7, 4]).op(62, &[6, 10]);
+        a.bytes()
+    }
+
+    #[test]
+    fn handle_remap_matches_the_python() {
+        let m = packed_handle();
+        let r = remap_handles(&m, 0x123, 0x456, 1).unwrap();
+        assert!(remap_handles(&m, 1, 2, 2).is_err());
+        assert!(remap_handles(&sample(), 1, 2, 1).is_err());
+        if let Ok(d) = std::env::var("NX_DUMP_SPV") {
+            std::fs::write(format!("{d}/packed.spv"), &m).unwrap();
+            std::fs::write(format!("{d}/packed_remapped.spv"), &r).unwrap();
+        }
     }
 
     #[test]
