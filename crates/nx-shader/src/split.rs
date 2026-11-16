@@ -204,6 +204,185 @@ pub fn glslc_shaders(d: &[u8], label: &str) -> Vec<Found> {
     out
 }
 
+/// MercurySteam's MSHD (Metroid Dread, system/shd/*.bshdat): control section, then the code area at the next code header; the stages alternate vertex, pixel
+pub fn mshd_shaders(d: &[u8], label: &str) -> Result<Vec<Found>, String> {
+    let mut out: Vec<Found> = vec![];
+    let mut c = find_all(d, &CTL_MAGIC).next();
+    while let Some(ci) = c {
+        let nctl = u32le(d, ci + 0x20)? as usize;
+        let g = d.get(ci + nctl..).and_then(|t| find_all(t, &GFX_MAGIC).next()).map(|x| ci + nctl + x);
+        let g = match g {
+            Some(g) if nctl >= 0x880 && g - ci - nctl <= 0x400 => g,
+            _ => return Err(format!("{label} MSHD control section @{ci:#x}: length {nctl:#x}, no code area header after it")),
+        };
+        let ncode = u32le(d, ci + 0x704)? as usize;
+        let (ctl, code) = (d.get(ci..ci + nctl).ok_or("MSHD control section is cut short")?, d.get(g..g + ncode).ok_or("MSHD code area is cut short")?);
+        let want = if out.len() % 2 == 0 { Stage::Vs } else { Stage::Ps };
+        let st = sph_stage(code);
+        if st != Some(want) {
+            return Err(format!("{label} MSHD @{ci:#x}: stage {} is {:?}, not alternating vertex / pixel", out.len(), st.map(Stage::name)));
+        }
+        if let Some(why) = check(want, ctl, code) {
+            return Err(format!("{label} MSHD @{ci:#x} {}: {why}", want.name()));
+        }
+        out.push(Found { label: format!("{label}#MSHD#var{}", out.len() / 2), stage: want, ctl: ctl.to_vec(), code: code.to_vec() });
+        c = d.get(g + ncode..).and_then(|t| find_all(t, &CTL_MAGIC).next()).map(|x| g + ncode + x);
+    }
+    if out.len() % 2 != 0 {
+        return Err(format!("{label} MSHD: {} stages, not in pairs", out.len()));
+    }
+    Ok(out)
+}
+
+/// A little-endian reader with .NET's BinaryReader strings (7-bit encoded length, then the bytes)
+struct Rd<'a> {
+    d: &'a [u8],
+    p: usize,
+}
+impl<'a> Rd<'a> {
+    fn raw(&mut self, n: usize) -> Result<&'a [u8], String> {
+        let e = self.p.checked_add(n).filter(|&e| e <= self.d.len()).ok_or("MGFX effect is cut short")?;
+        let s = &self.d[self.p..e];
+        self.p = e;
+        Ok(s)
+    }
+    fn u8(&mut self) -> Result<u8, String> {
+        Ok(self.raw(1)?[0])
+    }
+    fn u32(&mut self) -> Result<u32, String> {
+        Ok(u32::from_le_bytes(self.raw(4)?.try_into().unwrap()))
+    }
+    fn string(&mut self) -> Result<&'a [u8], String> {
+        let (mut n, mut sh) = (0usize, 0u32);
+        loop {
+            let b = self.u8()?;
+            n |= ((b & 0x7f) as usize) << sh;
+            sh += 7;
+            if b < 0x80 {
+                return self.raw(n);
+            }
+            if sh > 28 {
+                return Err("MGFX: string length".into());
+            }
+        }
+    }
+}
+
+/// A MonoGame effect at d[p..] (Celeste: 13 in Content/Effects/*.xnb, and SpriteBatch's in main): "MGFX", version 8, profile, effect key; constant buffers; the shaders (vertex 1 / pixel 0, a control section and a code area each,
+/// then their samplers and attributes); parameters, techniques and passes, read to the end so a misread shows. None when the header is not version 8's or its first shader is not an NVN one.
+fn mgfx_effect(d: &[u8], p: usize, label: &str) -> Result<Option<Vec<Found>>, String> {
+    if d.get(p + 4) != Some(&8) {
+        return Ok(None);
+    }
+    let mut r = Rd { d, p: p + 10 };
+    let prelude = (|| -> Result<bool, String> {
+        for _ in 0..r.u8()? {
+            r.string()?;
+            r.raw(2)?;
+            let n = r.u8()? as usize;
+            r.raw(3 * n)?;
+        }
+        Ok(d.get(r.p + 10..r.p + 14) == Some(&CTL_MAGIC[..]))
+    })();
+    if !matches!(prelude, Ok(true)) {
+        return Ok(None);
+    }
+    let at = format!("{label} MGFX @{p:#x}");
+    let mut out = vec![];
+    for i in 0..r.u8()? {
+        let (vs, n) = (r.u8()?, r.u32()? as usize);
+        let bc = r.raw(n)?;
+        let nctl = bc.get(..4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize).ok_or("MGFX shader is cut short")?;
+        let ncode = if 8 + nctl <= n { u32::from_le_bytes(bc[4 + nctl..8 + nctl].try_into().unwrap()) as usize } else { usize::MAX };
+        if vs > 1 || 8 + nctl + ncode != n {
+            return Err(format!("{at} shader {i}: {n:#x} bytes, not a control section and a code area"));
+        }
+        let (ctl, code) = (&bc[4..4 + nctl], &bc[8 + nctl..]);
+        let st = if code.get(..4) == Some(&GFX_MAGIC[..]) { sph_stage(code) } else { None };
+        let want = if vs == 1 { Stage::Vs } else { Stage::Ps };
+        if st != Some(want) {
+            return Err(format!("{at} shader {i}: the SPH stage is {:?}, the effect says {}", st.map(Stage::name), want.name()));
+        }
+        if let Some(why) = check(want, ctl, code) {
+            return Err(format!("{at} shader {i}: {why}"));
+        }
+        out.push(Found { label: format!("{label}#MGFX@{p:#x}#{i}"), stage: want, ctl: ctl.to_vec(), code: code.to_vec() });
+        for _ in 0..r.u8()? {
+            r.raw(3)?;
+            if r.u8()? != 0 {
+                r.raw(20)?;
+            }
+            r.string()?;
+            r.u8()?;
+        }
+        let n = r.u8()? as usize;
+        r.raw(n)?;
+        for _ in 0..r.u8()? {
+            r.string()?;
+            r.raw(4)?;
+        }
+    }
+    fn no_annotations(r: &mut Rd, at: &str) -> Result<(), String> {
+        if r.u8()? != 0 {
+            return Err(format!("{at}: annotations (MonoGame writes none)"));
+        }
+        Ok(())
+    }
+    // {class, type, name, semantic, annotations, rows, columns, elements, struct members, the value when it has neither} each → how many
+    fn params(r: &mut Rd, at: &str) -> Result<usize, String> {
+        let n = r.u8()? as usize;
+        for _ in 0..n {
+            let typ = r.raw(2)?[1];
+            r.string()?;
+            r.string()?;
+            no_annotations(r, at)?;
+            let (rows, cols) = (r.u8()? as usize, r.u8()? as usize);
+            if params(r, at)? + params(r, at)? > 0 {
+                continue;
+            }
+            if (1..=3).contains(&typ) {
+                r.raw(4 * rows * cols)?;
+            } else if typ == 4 {
+                r.string()?;
+            }
+        }
+        Ok(n)
+    }
+    params(&mut r, &at)?;
+    for _ in 0..r.u8()? {
+        r.string()?;
+        no_annotations(&mut r, &at)?;
+        for _ in 0..r.u8()? {
+            r.string()?;
+            no_annotations(&mut r, &at)?;
+            let (v, f) = (r.u8()?, r.u8()?);
+            if (v != 255 && v as usize >= out.len()) || (f != 255 && f as usize >= out.len()) {
+                return Err(format!("{at}: a pass names shader {v} / {f} of {}", out.len()));
+            }
+            for n in [18, 25, 12] {
+                if r.u8()? != 0 {
+                    r.raw(n)?;
+                }
+            }
+        }
+    }
+    if label.ends_with(".xnb") && r.p != d.len() {
+        return Err(format!("{at}: the effect ends at {:#x}, the file at {:#x}", r.p, d.len()));
+    }
+    Ok(Some(out))
+}
+
+pub fn mgfx_shaders(d: &[u8], label: &str) -> Result<Vec<Found>, String> {
+    let mut out = vec![];
+    for p in find_all(d, b"MGFX") {
+        out.extend(mgfx_effect(d, p, label)?.unwrap_or_default());
+    }
+    if label.ends_with(".xnb") && d.get(..0x200.min(d.len())).is_some_and(|h| find_all(h, b"EffectReader").next().is_some()) && out.is_empty() {
+        return Err(format!("{label}: an XNB effect without an MGFX version 8 effect of NVN shaders"));
+    }
+    Ok(out)
+}
+
 pub fn bnsh_shaders(d: &[u8], base: usize, label: &str) -> Result<Vec<Found>, String> {
     if d.get(base + 0x60..base + 0x64) != Some(b"grsc") {
         return Err(format!("{label} BNSH @{base:#x} has no grsc block"));
@@ -295,11 +474,18 @@ pub fn scan_blob(d: &[u8], label: &str, out: &mut Vec<Found>) -> Result<(), Stri
         out.extend(bahs_shaders(d, label)?);
         return Ok(());
     }
+    if d.get(..4) == Some(b"MSHD") {
+        out.extend(mshd_shaders(d, label)?);
+        return Ok(());
+    }
     for p in find_all(d, b"BNSH\0\0\0\0") {
         let Ok(size) = u32le(d, p + 0x1C) else { continue };
         if p + size as usize <= d.len() && d.get(p + 0x60..p + 0x64) == Some(b"grsc") {
             out.extend(bnsh_shaders(d, p, label)?);
         }
+    }
+    if find_all(d, b"MGFX").next().is_some() {
+        out.extend(mgfx_shaders(d, label)?);
     }
     out.extend(glslc_shaders(d, label));
     Ok(())
@@ -355,7 +541,7 @@ pub fn scan_file_with(bytes: &[u8], label: &str, out: &mut Vec<Found>, u: &mut U
             Err(e) => Err(e.to_string()),
         };
     }
-    let interesting = bytes.get(..4).is_some_and(|m| matches!(m, b"Yaz0" | b"SARC" | b"BAHS")) || find_all(bytes, b"BNSH\0\0\0\0").next().is_some() || find_all(bytes, &[0x91, 0x68, 0x86, 0x19]).next().is_some();
+    let interesting = bytes.get(..4).is_some_and(|m| matches!(m, b"Yaz0" | b"SARC" | b"BAHS" | b"MSHD")) || find_all(bytes, b"BNSH\0\0\0\0").next().is_some() || find_all(bytes, &[0x91, 0x68, 0x86, 0x19]).next().is_some() || find_all(bytes, b"MGFX").next().is_some();
     if interesting {
         scan_blob(bytes, label, out)?;
     }
@@ -449,6 +635,35 @@ mod tests {
         let ctl = vec![0u8; 0x880];
         let k = skey(&ctl, b"x");
         assert_eq!(format!("{k:016x}"), "99c3ed278ecd8e49");
+    }
+
+    #[test]
+    fn mshd_alternates_vertex_and_pixel() {
+        let mk = |sph: u32| {
+            let mut ctl = vec![0u8; 0x880];
+            ctl[..4].copy_from_slice(&CTL_MAGIC);
+            ctl[0x20..0x24].copy_from_slice(&0x880u32.to_le_bytes());
+            ctl[0x704..0x708].copy_from_slice(&0x100u32.to_le_bytes());
+            let mut code = vec![0u8; 0x100];
+            code[..4].copy_from_slice(&GFX_MAGIC);
+            code[0x30..0x34].copy_from_slice(&(sph << 10).to_le_bytes());
+            (ctl, code)
+        };
+        let (vc, vk) = mk(1);
+        let (pc, pk) = mk(5);
+        let mut f = b"MSHD\0\0\0\0".to_vec();
+        for x in [&vc, &vk, &pc, &pk] {
+            f.extend(x.iter());
+        }
+        let mut out = vec![];
+        scan_file(&f, "/x.bshdat", &mut out).unwrap();
+        assert_eq!(out.iter().map(|o| (o.stage, o.label.as_str())).collect::<Vec<_>>(), vec![(Stage::Vs, "/x.bshdat#MSHD#var0"), (Stage::Ps, "/x.bshdat#MSHD#var0")]);
+        // two vertex stages in a row break the alternation
+        let mut bad = b"MSHD\0\0\0\0".to_vec();
+        for x in [&vc, &vk, &vc, &vk] {
+            bad.extend(x.iter());
+        }
+        assert!(scan_file(&bad, "/x", &mut vec![]).is_err());
     }
 
     #[test]
