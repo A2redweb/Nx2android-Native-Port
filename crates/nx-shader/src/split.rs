@@ -308,3 +308,9 @@ mod tests {
         assert_eq!(format!("{k:016x}"), "99c3ed278ecd8e49");
     }
 }
+
+/// A synthetic BNSH for the tests of this crate: (the file, vertex control, vertex code, pixel code)
+#[cfg(test)]
+pub fn tests_fake_bnsh() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    tests::fake_bnsh()
+}
