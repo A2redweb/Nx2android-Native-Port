@@ -11,9 +11,22 @@ TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 mkdir -p "$OUT"
 for t in dmsh_xlate:nxnative/dm/gfx/tools/dmsh_xlate; do
   name="${t%%:*}"; proj="${t#*:}"
+  # The SDK has no NativeAOT runtime pack of its own for linux-bionic-arm64: it restores the glibc one (linux-arm64), whose sdk/ assemblies the compiler then misses ("The PrivateSdkAssemblies
+  # ItemGroup is required"). NuGet has the bionic pack under its own ID, so it is fetched at the compiler's version and named by hand.
+  dotnet restore "$SRC/$proj" -r linux-bionic-arm64 -p:PublishAot=true -nologo -v quiet
+  VER="$(ls "$HOME/.nuget/packages/microsoft.dotnet.ilcompiler" | sort -V | tail -1)"
+  PACK_ID=microsoft.netcore.app.runtime.nativeaot.linux-bionic-arm64
+  PACK="$OUT/packs/$PACK_ID"
+  if [ ! -d "$PACK" ]; then
+    mkdir -p "$PACK"
+    curl -fsSL "https://api.nuget.org/v3-flatcontainer/$PACK_ID/$VER/$PACK_ID.$VER.nupkg" -o "$PACK/pack.zip"
+    (cd "$PACK" && unzip -q pack.zip && rm pack.zip)
+  fi
+  ls "$PACK/runtimes/linux-bionic-arm64"
   dotnet publish "$SRC/$proj" -c Release -r linux-bionic-arm64 -o "$OUT/$name" -nologo -v minimal \
     --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true \
     -p:CppCompilerAndLinker="$TC/bin/aarch64-linux-android${API}-clang" \
+    -p:IlcSdkPath="$PACK/runtimes/linux-bionic-arm64/native/" -p:IlcFrameworkNativePath="$PACK/runtimes/linux-bionic-arm64/native/" -p:IlcFrameworkPath="$PACK/runtimes/linux-bionic-arm64/lib/net10.0/" \
     -p:SysRoot="$TC/sysroot" -p:ObjCopyName="$TC/bin/llvm-objcopy"
 done
 # a bionic build names Android's own loader, not glibc's
