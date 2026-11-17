@@ -21,3 +21,7 @@ The `prebuilt` release of `A2redweb/nx2android-android-port` (checked: `nx-tools
 Not run yet. No .NET SDK in the authoring environment, so the compiler and linker properties are unverified. Next: run the `bionic-tools` workflow, then start both tools from a test app on the Poco X6 (`dmsh_xlate --source-sha` must print 16 hex digits; `nx_extract` must print usage).
 
 If NativeAOT for bionic does not link, fall back to: (a) a Mono or CoreCLR bionic runtime shipped in the app, or (b) replacing the tools.
+
+## Result of the CI build (2026-11-17)
+
+The bionic NativeAOT build of `dmsh_xlate` works in CI: the APK of commit 1078c78 holds `lib/arm64-v8a/libdmsh_xlate.so` (3.78 MB) next to `libnxcore.so` and `libdmhost.so`, and the build printed no "did not build" warning. **Not yet run on a device**: whether it starts and translates a real shader is unproven. If it does not start on Android, the fallback is the other project's approach (a glibc linux-arm64 tool run through its own loader), which needs a root file system.
