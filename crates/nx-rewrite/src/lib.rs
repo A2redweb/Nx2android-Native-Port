@@ -2,8 +2,8 @@
 //! jump tables through x18) into branches to stubs in an appended patch area, and writes the files the host loads.
 //!
 //! Frame step stubs of the builds that have them are replayed from `framestep.tsv` (`framestep.rs`). Observation gates are diagnostics only and are left out.
-//! Not done yet (each by an error where it would matter): spin-wait copies (a speed matter), functions longer than `BIG_FN`
-//! without unwind entries, and the FAR layout (a module whose patch area would start beyond 112 MB).
+//! The FAR layout (a module whose patch area would start beyond 112 MB) puts the patch area before the base.
+//! Not done yet (each by an error where it would matter): spin-wait copies (a speed matter), and functions longer than `BIG_FN` without unwind entries.
 
 pub mod analysis;
 pub mod asm;
@@ -55,6 +55,11 @@ enum K {
     X18,
 }
 
+/// Signed hex as Python prints it (`-0x2000000`), which is how the loader reads PATCH_OFF.
+fn shex(v: i64) -> String {
+    if v < 0 { format!("-{:#x}", -v) } else { format!("{v:#x}") }
+}
+
 fn rd32(img: &[u8], o: i64) -> u32 {
     u32::from_le_bytes(img[o as usize..o as usize + 4].try_into().unwrap())
 }
@@ -91,22 +96,49 @@ pub fn rewrite(nso_bytes: &[u8], cuts: &[Cut]) -> R<Output> {
 
 /// `steps` are the build's frame step ops (`framestep.tsv`), empty for a build with none.
 pub fn rewrite_with(nso_bytes: &[u8], cuts: &[Cut], steps: &[framestep::Op]) -> R<Output> {
+    rewrite_inner(nso_bytes, cuts, steps, None)
+}
+
+/// Every jump between the patch area and the code is a B (±128 MB). An appended patch area cannot reach the code when it would start beyond 112 MB (Metroid Dread's main has about
+/// 1.8 GB of bss): it then sits `front` bytes before the module base (a negative PATCH_OFF), the file holds text + ro + data and the patch area, and the loader supplies zero pages for
+/// bss and the key page. A text segment that ends within 32 MB of the reach (Monster Hunter Rise) gets the gap that keeps every site in reach; when the patch area does not fit, the
+/// rewrite is run again with exactly the size it needs (`front_override`).
+fn rewrite_inner(nso_bytes: &[u8], cuts: &[Cut], steps: &[framestep::Op], front_override: Option<i64>) -> R<Output> {
     let nso = nx_nso::Nso::parse(nso_bytes).map_err(|e| e.to_string())?;
     let mut img = nso.image(nso_bytes).map_err(|e| e.to_string())?;
     let bss = nso.bss as usize;
     let text_end = nso.segments[0].size as i64;
     let (ro_off, data_off) = (nso.segments[1].mem_offset as i64, nso.segments[2].mem_offset as i64);
-    img.resize(img.len() + bss, 0);
-    let key_page_off = (img.len() as i64 + 0x3FFF) & !0x3FFF;
-    img.resize(key_page_off as usize + 0x4000, 0);
-    // a build with frame step stubs has a page after the key page that the loader writes the target fps into
-    let state_off = (!steps.is_empty()).then_some(key_page_off + 0x4000);
-    if state_off.is_some() {
-        img.resize(key_page_off as usize + 0x8000, 0);
+    let near_patch_off = ((((img.len() + bss + 0x3FFF) & !0x3FFF) + 0x4000 + 0xFFFF) & !0xFFFF) as i64;
+    let far = near_patch_off > 0x700_0000;
+    let text_len = nso.segments[0].size as i64;
+    let mut front = 0x200_0000i64;
+    let big_text = far && text_len + front > 0x800_0000 - 0x1_0000;
+    if big_text {
+        front = front_override.unwrap_or((0x800_0000 - 0x1_0000 - text_len) & !0xFFFF);
     }
-    let patch_off = (img.len() as i64 + 0xFFFF) & !0xFFFF;
-    if patch_off > 0x700_0000 {
-        return Err(format!("the patch area would start at {patch_off:#x}: the FAR layout is not implemented yet"));
+    let (key_page_off, patch_off, state_off, file_image_len, image_size);
+    if far {
+        if !steps.is_empty() {
+            return Err("a frame step on a module with a far patch area is not supported".into());
+        }
+        file_image_len = (img.len() as i64 + 0x3FFF) & !0x3FFF;
+        key_page_off = (img.len() as i64 + bss as i64 + 0x3FFF) & !0x3FFF;
+        image_size = key_page_off + 0x4000;
+        patch_off = -front;
+        state_off = None;
+    } else {
+        img.resize(img.len() + bss, 0);
+        key_page_off = (img.len() as i64 + 0x3FFF) & !0x3FFF;
+        img.resize(key_page_off as usize + 0x4000, 0);
+        // a build with frame step stubs has a page after the key page that the loader writes the target fps into
+        state_off = (!steps.is_empty()).then_some(key_page_off + 0x4000);
+        if state_off.is_some() {
+            img.resize(key_page_off as usize + 0x8000, 0);
+        }
+        patch_off = (img.len() as i64 + 0xFFFF) & !0xFFFF;
+        file_image_len = 0;
+        image_size = 0;
     }
     let build_id = nso.build_id_hex();
 
@@ -325,11 +357,24 @@ pub fn rewrite_with(nso_bytes: &[u8], cuts: &[Cut], steps: &[framestep::Op]) -> 
 
     // ---- files
     let mut out = Output { data_blocks: data_blocks.clone(), ..Default::default() };
-    img.resize(patch_off as usize, 0);
+    if far {
+        if big_text && front_override.is_none() && em.patch.len() as i64 > front - 0x4000 {
+            return rewrite_inner(nso_bytes, cuts, steps, Some((em.patch.len() as i64 + 0x4000 + 0xFFFF) & !0xFFFF));
+        }
+        if em.patch.len() as i64 > front - 0x4000 {
+            return Err(format!("the patch area of {:#x} bytes does not fit in the {front:#x} before the base", em.patch.len()));
+        }
+        img.resize(file_image_len as usize, 0);
+    } else {
+        img.resize(patch_off as usize, 0);
+    }
     img.extend_from_slice(&em.patch);
     out.patched = img;
     let mut f = String::new();
-    let _ = write!(f, "# PATCH_OFF\t{patch_off:#x}\n# KEY_PAGE_OFF\t{key_page_off:#x}\n# KEY_PAGE_SIZE\t0x4000\n# TEXT_END\t{text_end:#x}\n# RO_OFF\t{ro_off:#x}\n# DATA_OFF\t{data_off:#x}\n");
+    let _ = write!(f, "# PATCH_OFF\t{}\n# KEY_PAGE_OFF\t{key_page_off:#x}\n# KEY_PAGE_SIZE\t0x4000\n# TEXT_END\t{text_end:#x}\n# RO_OFF\t{ro_off:#x}\n# DATA_OFF\t{data_off:#x}\n", shex(patch_off));
+    if far {
+        let _ = write!(f, "# IMAGE_SIZE\t{image_size:#x}\n# FILE_IMAGE_LEN\t{file_image_len:#x}\n");
+    }
     for (i, k) in emit::KEYS.iter().enumerate() {
         let _ = writeln!(f, "# KEY_{k}_IDX\t{i}");
     }
@@ -438,7 +483,31 @@ mod tests {
 
     fn fixup(o: &Output, k: &str) -> i64 {
         let l = o.fixups.lines().find(|l| l.starts_with(&format!("# {k}\t"))).unwrap();
-        i64::from_str_radix(l.split('\t').nth(1).unwrap().trim_start_matches("0x"), 16).unwrap()
+        {
+            let v = l.split('\t').nth(1).unwrap();
+            let (neg, v) = v.strip_prefix('-').map_or((false, v), |x| (true, x));
+            let n = i64::from_str_radix(v.trim_start_matches("0x"), 16).unwrap();
+            if neg { -n } else { n }
+        }
+    }
+
+    #[test]
+    fn a_huge_bss_puts_the_patch_area_before_the_base() {
+        let mut n = fake_nso(&[0xAA00_03F2, 0xD53B_D040]); // mov x18,x0; mrs x0,tpidr_el0
+        n[0x3C..0x40].copy_from_slice(&0x800_0000u32.to_le_bytes()); // 128 MB of bss
+        let o = rewrite(&n, &[]).unwrap();
+        let po = fixup(&o, "PATCH_OFF");
+        assert_eq!(po, -0x200_0000);
+        assert_eq!(fixup(&o, "FILE_IMAGE_LEN"), 0x4000);
+        assert_eq!(fixup(&o, "KEY_PAGE_OFF"), 0x800_4000);
+        assert_eq!(fixup(&o, "IMAGE_SIZE"), 0x800_8000);
+        // the file is the image (to 0x3000) and the patch area; the sites branch backwards into it
+        assert!(o.patched.len() > 0x4000);
+        let w = rd32(&o.patched, 0x10);
+        assert_eq!(w >> 26, 5);
+        let off = ((w & 0x03FF_FFFF) as i64) << 38 >> 38; // sign-extended words
+        let target = 0x10 + off * 4;
+        assert!(target < 0 && target >= po, "{target:#x}");
     }
 
     #[test]
