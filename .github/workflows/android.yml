@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+# two runs publishing the same pre-release at once make an upload fail with 404: one build at a time, the newer commit replaces a waiting one
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   apk:
     runs-on: ubuntu-latest
