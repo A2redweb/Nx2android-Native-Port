@@ -1,7 +1,8 @@
 //! NSO rewriter: a port of upstream's `patch_nso.py` for the Android target. Reads a Switch module, rewrites what cannot run natively (x18, thread registers, svc, timers, exclusive windows,
 //! jump tables through x18) into branches to stubs in an appended patch area, and writes the files the host loads.
 //!
-//! Not done yet (each listed in the output's `skipped` and by an error where it would matter): spin-wait copies, observation gates, frame-step stubs, functions longer than `BIG_FN`
+//! Frame step stubs of the builds that have them are replayed from `framestep.tsv` (`framestep.rs`). Observation gates are diagnostics only and are left out.
+//! Not done yet (each by an error where it would matter): spin-wait copies (a speed matter), functions longer than `BIG_FN`
 //! without unwind entries, and the FAR layout (a module whose patch area would start beyond 112 MB).
 
 pub mod analysis;
@@ -9,6 +10,7 @@ pub mod asm;
 pub mod cfi;
 pub mod cuts;
 pub mod emit;
+pub mod framestep;
 pub mod pat;
 
 use analysis::{classify_br, find_windows, retry_block, Jump};
@@ -84,6 +86,11 @@ fn disasm(img: &[u8], fa: i64, fb: i64) -> Vec<I> {
 }
 
 pub fn rewrite(nso_bytes: &[u8], cuts: &[Cut]) -> R<Output> {
+    rewrite_with(nso_bytes, cuts, &[])
+}
+
+/// `steps` are the build's frame step ops (`framestep.tsv`), empty for a build with none.
+pub fn rewrite_with(nso_bytes: &[u8], cuts: &[Cut], steps: &[framestep::Op]) -> R<Output> {
     let nso = nx_nso::Nso::parse(nso_bytes).map_err(|e| e.to_string())?;
     let mut img = nso.image(nso_bytes).map_err(|e| e.to_string())?;
     let bss = nso.bss as usize;
@@ -92,6 +99,11 @@ pub fn rewrite(nso_bytes: &[u8], cuts: &[Cut]) -> R<Output> {
     img.resize(img.len() + bss, 0);
     let key_page_off = (img.len() as i64 + 0x3FFF) & !0x3FFF;
     img.resize(key_page_off as usize + 0x4000, 0);
+    // a build with frame step stubs has a page after the key page that the loader writes the target fps into
+    let state_off = (!steps.is_empty()).then_some(key_page_off + 0x4000);
+    if state_off.is_some() {
+        img.resize(key_page_off as usize + 0x8000, 0);
+    }
     let patch_off = (img.len() as i64 + 0xFFFF) & !0xFFFF;
     if patch_off > 0x700_0000 {
         return Err(format!("the patch area would start at {patch_off:#x}: the FAR layout is not implemented yet"));
@@ -281,6 +293,36 @@ pub fn rewrite(nso_bytes: &[u8], cuts: &[Cut]) -> R<Output> {
         put_branch(&mut img, a, st)?;
     }
 
+    // ---- frame step stubs
+    let mut fs_cuts: Vec<Cut> = vec![];
+    let mut render_scale = false;
+    if let Some(state) = state_off {
+        let plan = framestep::plan(steps, &framestep::Place { stub: em.here(), state })?;
+        for (off, orig) in &plan.sites {
+            let end = *off as usize + orig.len();
+            if img.get(*off as usize..end) != Some(&orig[..]) {
+                return Err(format!("frame step original bytes mismatch at {off:#x}"));
+            }
+            for o in (*off..*off + orig.len() as i64).step_by(4) {
+                if kinds.contains_key(&o) || windows.iter().any(|w| w.first().is_some_and(|f| f.a <= o) && w.last().is_some_and(|l| o < l.a + 4)) {
+                    return Err(format!("frame step site {o:#x} is a rewrite site"));
+                }
+            }
+        }
+        for w in &plan.emitted {
+            em.emit(*w);
+        }
+        for (off, words, why) in &plan.cuts {
+            let o = *off as usize;
+            let old = img[o..o + 4 * words.len()].to_vec();
+            let new: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+            img[o..o + new.len()].copy_from_slice(&new);
+            fs_cuts.push(Cut { off: *off, orig: old, new, why: why.clone() });
+            bump("frame_step");
+        }
+        render_scale = plan.render_scale;
+    }
+
     // ---- files
     let mut out = Output { data_blocks: data_blocks.clone(), ..Default::default() };
     img.resize(patch_off as usize, 0);
@@ -292,6 +334,12 @@ pub fn rewrite(nso_bytes: &[u8], cuts: &[Cut]) -> R<Output> {
         let _ = writeln!(f, "# KEY_{k}_IDX\t{i}");
     }
     let _ = write!(f, "# TARGET\tandroid\n# BUILD_ID\t{build_id}\n");
+    if let Some(state) = state_off {
+        let _ = writeln!(f, "# FPS_STATE_OFF\t{state:#x}");
+    }
+    if render_scale {
+        f.push_str("# RENDER_SCALE\t1\n");
+    }
     out.fixups = f;
     for g in &em.gates {
         let _ = writeln!(out.gates, "{:#x}\t{}\t{}\t{:#x}", g.ret, g.kind, g.arg, g.orig);
@@ -312,7 +360,7 @@ pub fn rewrite(nso_bytes: &[u8], cuts: &[Cut]) -> R<Output> {
         let _ = writeln!(out.sites, "{a:#x}\tT\t{}", t.iter().map(|t| format!("{t:#x}")).collect::<Vec<_>>().join(" "));
     }
     let _ = writeln!(out.cuts, "# BUILD_ID\t{build_id}");
-    for c in cuts {
+    for c in cuts.iter().chain(&fs_cuts) {
         let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
         let _ = writeln!(out.cuts, "{:#x}\t{}\t{}\t{}", c.off, hex(&c.orig), hex(&c.new), c.why);
     }
@@ -359,6 +407,38 @@ mod tests {
 
     fn word(o: &Output, off: i64) -> u32 {
         rd32(&o.patched, off)
+    }
+
+    #[test]
+    fn frame_step_stubs_are_placed_and_checked() {
+        // site at 0x20 (a nop): becomes a branch into a stub that reads the state page and goes back
+        let n = fake_nso(&[0xAA00_03F2]);
+        let steps = framestep::parse("ab\tsite\t0x20\t1f2003d5\nab\temit\tADRP:0x10:0x40000000:0x50000000\nab\temit\t0xb9400210\nab\temit\tB:0x40000008:0x24\nab\tput\t0x20\tB:0x20:0x40000000\tstep\nab\trender_scale\t1\n").unwrap();
+        let o = rewrite_with(&n, &[], &steps["ab"]).unwrap();
+        // layout: image 0x3000 + bss 0x1000, key page 0x4000..0x8000, state page 0x8000..0xc000, patch area at 0x10000
+        assert!(o.fixups.contains("# FPS_STATE_OFF\t0x8000\n") && o.fixups.contains("# RENDER_SCALE\t1\n"), "{}", o.fixups);
+        let po = fixup(&o, "PATCH_OFF");
+        assert!(po >= 0xC000 && po % 0x10000 == 0, "{po:#x}");
+        // the stub starts where the rewritten site's own stubs end
+        let w20 = word(&o, 0x20);
+        assert_eq!(w20 >> 26, 5, "a branch");
+        let base = 0x20 + 4 * ((w20 & 0x03FF_FFFF) as i64);
+        assert!(base >= po && base < po + o.patched.len() as i64 - po, "{base:#x}");
+        assert_eq!(word(&o, base + 4), 0xb9400210);
+        assert_eq!(word(&o, base), asm::adrp(16, base, 0x8000).unwrap());
+        assert_eq!(word(&o, base + 8), asm::b(base + 8, 0x24).unwrap());
+        assert!(o.cuts.contains("\tstep"));
+        // a site whose bytes differ is refused
+        let bad = framestep::parse("ab\tsite\t0x20\t00000000\n").unwrap();
+        assert!(rewrite_with(&n, &[], &bad["ab"]).unwrap_err().contains("mismatch"));
+        // a site on a rewrite site is refused
+        let on = framestep::parse("ab\tsite\t0x10\taa0300f2\n").unwrap();
+        assert!(rewrite_with(&n, &[], &on["ab"]).is_err());
+    }
+
+    fn fixup(o: &Output, k: &str) -> i64 {
+        let l = o.fixups.lines().find(|l| l.starts_with(&format!("# {k}\t"))).unwrap();
+        i64::from_str_radix(l.split('\t').nth(1).unwrap().trim_start_matches("0x"), 16).unwrap()
     }
 
     #[test]

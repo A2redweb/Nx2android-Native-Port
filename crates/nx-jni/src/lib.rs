@@ -97,7 +97,8 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativePrepare(env: J
 pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeRewrite(env: JNIEnv, _c: JClass, profiles: JString, id: JString, dir: JString) -> JString {
     let profiles = get(env, profiles);
     let cuts = std::fs::read_to_string(std::path::Path::new(&profiles).join("cuts.tsv")).unwrap_or_default();
-    let r = nx_core::rewrite_modules(std::path::Path::new(&profiles), &cuts, &get(env, id), std::path::Path::new(&get(env, dir)));
+    let steps = std::fs::read_to_string(std::path::Path::new(&profiles).join("framestep.tsv")).unwrap_or_default();
+    let r = nx_core::rewrite_modules(std::path::Path::new(&profiles), &cuts, &steps, &get(env, id), std::path::Path::new(&get(env, dir)));
     make(env, &match r {
         Ok(s) => format!("ok: {s}"),
         Err(e) => format!("error: {e}"),
