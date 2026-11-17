@@ -112,45 +112,52 @@ impl<R: Read + Seek> Package<R> {
     }
 }
 
-/// A dump from a path: an NSP or XCI as it is, an NSZ or XCZ decompressed first into `tmp` (a file `<name>.nsp`, removed by `Opened::finish`).
-pub struct Opened {
-    pub package: Package<std::io::BufReader<fs::File>>,
-    temp: Option<std::path::PathBuf>,
+/// The reader a dump is read through: the file itself, or, for an NSZ / XCZ, the NSP it stands for, decompressed only where it is read.
+pub enum Source {
+    File(std::io::BufReader<fs::File>),
+    Lazy(std::io::BufReader<nx_nsz::LazyNsp>),
 }
 
-impl Opened {
-    /// Deletes the decompressed copy, if one was made.
-    pub fn finish(self) {
-        drop(self.package);
-        if let Some(t) = self.temp {
-            let _ = fs::remove_file(t);
+impl io::Read for Source {
+    fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Source::File(r) => r.read(b),
+            Source::Lazy(r) => r.read(b),
         }
     }
 }
 
+impl io::Seek for Source {
+    fn seek(&mut self, p: io::SeekFrom) -> io::Result<u64> {
+        match self {
+            Source::File(r) => r.seek(p),
+            Source::Lazy(r) => r.seek(p),
+        }
+    }
+}
+
+/// A dump from a path: an NSP or XCI as it is; an NSZ or XCZ through a reader that decompresses on demand, so nothing the size of the game is ever written out.
+pub struct Opened {
+    pub package: Package<Source>,
+}
+
+impl Opened {
+    /// Closes the dump.
+    pub fn finish(self) {
+        drop(self.package);
+    }
+}
+
 /// `name` is the dump's own file name (what decides whether it is compressed); `path` may be a descriptor path such as `/proc/self/fd/7` that has no extension.
-pub fn open_path(path: &Path, name: &str, keys: &Keys, tmp: &Path, progress: &mut dyn FnMut(u64)) -> Result<Opened, Error> {
+/// `tmp` and `progress` are kept for callers written when a compressed dump was decompressed to a file first; they are not used.
+pub fn open_path(path: &Path, name: &str, keys: &Keys, _tmp: &Path, _progress: &mut dyn FnMut(u64)) -> Result<Opened, Error> {
     let shown = name.to_string();
-    let f = fs::File::open(path).map_err(|e| Error::Msg(format!("{shown}: {e}")))?;
     if !nx_nsz::is_compressed(Path::new(name)) {
-        return Ok(Opened { package: Package::open(std::io::BufReader::new(f), keys, &shown)?, temp: None });
+        let f = fs::File::open(path).map_err(|e| Error::Msg(format!("{shown}: {e}")))?;
+        return Ok(Opened { package: Package::open(Source::File(std::io::BufReader::new(f)), keys, &shown)? });
     }
-    fs::create_dir_all(tmp)?;
-    let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "dump".into());
-    let dst = tmp.join(format!("{stem}.nsp"));
-    let partial = tmp.join(format!("{stem}.nsp.partial"));
-    let res = (|| -> io::Result<()> {
-        let mut out = io::BufWriter::new(fs::File::create(&partial)?);
-        nx_nsz::decompress(&mut std::io::BufReader::new(f), &mut out, &shown, progress)?;
-        out.into_inner().map_err(|e| e.into_error())?;
-        fs::rename(&partial, &dst)
-    })();
-    if let Err(e) = res {
-        let _ = fs::remove_file(&partial);
-        return Err(Error::Io(e));
-    }
-    let g = fs::File::open(&dst)?;
-    Ok(Opened { package: Package::open(std::io::BufReader::new(g), keys, &shown)?, temp: Some(dst) })
+    let lazy = nx_nsz::LazyNsp::open(path, &shown).map_err(|e| Error::Msg(format!("{shown}: {e}")))?;
+    Ok(Opened { package: Package::open(Source::Lazy(std::io::BufReader::with_capacity(1 << 16, lazy)), keys, &shown)? })
 }
 
 /// `fs_type` of a section header: RomFS.

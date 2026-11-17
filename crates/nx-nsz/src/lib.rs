@@ -10,6 +10,9 @@ use nx_crypto::{Aes128, Sha256};
 use nx_zstd::Decoder;
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 
+mod lazy;
+pub use lazy::LazyNsp;
+
 const HEAD: u64 = 0x4000;
 const EXPECT_NAME_LEN: usize = 32;
 
@@ -118,41 +121,49 @@ fn nca_size(h: &Head) -> u64 {
 struct Sink<'a, W: Write> {
     w: &'a mut W,
     /// (start, end, key and counter for AES-CTR, or none for plain), in order, from `HEAD` on
-    segs: Vec<(u64, u64, Option<Aes128>, [u8; 8])>,
+    segs: Vec<Seg>,
     pos: u64,
     end: u64,
     sha: Sha256,
     progress: &'a mut dyn FnMut(u64),
 }
 
+type Seg = (u64, u64, Option<Aes128>, [u8; 8]);
+
+/// The NCA's byte ranges past the header, each plain or AES-CTR encrypted with its key and counter, in order; and the NCA's size.
+fn make_segs(h: &Head, name: &str) -> io::Result<(Vec<Seg>, u64)> {
+    let total = nca_size(h);
+    let mut segs = Vec::new();
+    let mut pos = HEAD;
+    for s in &h.secs {
+        let (mut o, mut size) = (s.offset, s.size);
+        if o < pos && pos == HEAD {
+            // a first section that starts inside the header (0xC00, nsz 5.0): its part there is already in the header
+            size = (o + size).saturating_sub(pos);
+            o = pos;
+        }
+        if o < pos {
+            return bad(format!("{name}: NCZ sections overlap at {o:#x}"));
+        }
+        if o > pos {
+            segs.push((pos, o, None, [0; 8])); // a gap: plain
+        }
+        let enc = matches!(s.crypto, 3 | 4);
+        if enc && o & 15 != 0 {
+            return bad(format!("{name}: an NCZ section at {o:#x} is not 16-byte aligned"));
+        }
+        segs.push((o, o + size, enc.then(|| Aes128::new(&s.key)), s.ctr[..8].try_into().unwrap()));
+        pos = o + size;
+    }
+    if pos < total {
+        segs.push((pos, total, None, [0; 8])); // past the last section, when the block header counts more
+    }
+    Ok((segs, total))
+}
+
 impl<'a, W: Write> Sink<'a, W> {
     fn new(w: &'a mut W, h: &Head, name: &str, progress: &'a mut dyn FnMut(u64)) -> io::Result<Self> {
-        let total = nca_size(h);
-        let mut segs = Vec::new();
-        let mut pos = HEAD;
-        for s in &h.secs {
-            let (mut o, mut size) = (s.offset, s.size);
-            if o < pos && pos == HEAD {
-                // a first section that starts inside the header (0xC00, nsz 5.0): its part there is already in the header
-                size = (o + size).saturating_sub(pos);
-                o = pos;
-            }
-            if o < pos {
-                return bad(format!("{name}: NCZ sections overlap at {o:#x}"));
-            }
-            if o > pos {
-                segs.push((pos, o, None, [0; 8])); // a gap: plain
-            }
-            let enc = matches!(s.crypto, 3 | 4);
-            if enc && o & 15 != 0 {
-                return bad(format!("{name}: an NCZ section at {o:#x} is not 16-byte aligned"));
-            }
-            segs.push((o, o + size, enc.then(|| Aes128::new(&s.key)), s.ctr[..8].try_into().unwrap()));
-            pos = o + size;
-        }
-        if pos < total {
-            segs.push((pos, total, None, [0; 8])); // past the last section, when the block header counts more
-        }
+        let (segs, total) = make_segs(h, name)?;
         Ok(Sink { w, segs, pos: HEAD, end: total, sha: Sha256::new(), progress })
     }
 
@@ -434,23 +445,17 @@ mod tests {
         assert_eq!(&out[files[1].offset as usize..], &[1, 2, 3]);
     }
 
-    #[test]
-    fn block_ncz_with_stored_and_compressed_blocks() {
-        let header = data(HEAD as usize);
-        let clear = 0x4000usize; // plain part and encrypted part, in 16 KiB blocks
-        let plain: Vec<u8> = (0..clear + 0x4000 + 100).map(|i| if i < clear { 7 } else { (i / 3) as u8 }).collect(); // the first block compresses (RLE), the others are stored
-        let nca = expected(&header, &plain, clear);
-        let bs = 1u64 << 14;
-        let body = &plain[..];
+    /// The NCZ (block mode) of `plain`: the first block RLE-compressed when it is all one byte, the others stored
+    fn block_ncz(header: &[u8], plain: &[u8], clear: usize) -> Vec<u8> {
+        let bs = 1usize << 14;
         let mut blocks = Vec::new();
         let mut sizes = Vec::new();
-        for (i, c) in body.chunks(bs as usize).enumerate() {
-            if i == 0 {
-                // a real zstd frame: one RLE block of 0x4000 sevens (window descriptor, block header 0x20001 << ... as RLE)
+        for (i, c) in plain.chunks(bs).enumerate() {
+            if i == 0 && c.iter().all(|&b| b == c[0]) {
                 let mut f = vec![0x28, 0xB5, 0x2F, 0xFD, 0x00, 0x58];
                 let h = (c.len() as u32) << 3 | 2 | 1; // RLE, last
                 f.extend(&h.to_le_bytes()[..3]);
-                f.push(7);
+                f.push(c[0]);
                 sizes.push(f.len() as u32);
                 blocks.extend(f);
             } else {
@@ -466,7 +471,33 @@ mod tests {
             bh.extend(s.to_le_bytes());
         }
         bh.extend(blocks);
-        let ncz = make_ncz(&header, &plain, clear, vec![], Some(bh));
+        make_ncz(header, plain, clear, vec![], Some(bh))
+    }
+
+    /// Compressed dumps of different shapes, for the tests of the lazy reader
+    pub(crate) fn sample_dumps() -> Vec<(&'static str, Vec<u8>)> {
+        let header = data(HEAD as usize);
+        let mut out = Vec::new();
+        let clear = 5008;
+        let big = data(clear + 3_000_001);
+        let nca = expected(&header, &big, clear);
+        out.push(("solid", pfs0(&[("a.bin", vec![9; 33]), (&format!("{}.ncz", sha_name(&nca)), make_ncz(&header, &big, clear, store(&big), None)), ("x.tik", vec![1, 2, 3])])));
+        let clear = 0x4000usize;
+        let plain: Vec<u8> = (0..clear + 5 * 0x4000 + 100).map(|i| if i < clear { 7 } else { (i / 3) as u8 }).collect();
+        let nca = expected(&header, &plain, clear);
+        out.push(("block", pfs0(&[(&format!("{}.ncz", sha_name(&nca)), block_ncz(&header, &plain, clear)), ("a.tik", vec![0])])));
+        let two = data(0x2345);
+        out.push(("two", pfs0(&[("00000000000000000000000000000001.ncz", make_ncz(&header, &two, 0x10, store(&two), None)), ("00000000000000000000000000000002.ncz", block_ncz(&header, &two, 0x10))])));
+        out
+    }
+
+    #[test]
+    fn block_ncz_with_stored_and_compressed_blocks() {
+        let header = data(HEAD as usize);
+        let clear = 0x4000usize; // plain part and encrypted part, in 16 KiB blocks
+        let plain: Vec<u8> = (0..clear + 0x4000 + 100).map(|i| if i < clear { 7 } else { (i / 3) as u8 }).collect(); // the first block compresses (RLE), the others are stored
+        let nca = expected(&header, &plain, clear);
+        let ncz = block_ncz(&header, &plain, clear);
         let nsz = pfs0(&[(&format!("{}.ncz", sha_name(&nca)), ncz), ("a.tik", vec![0])]);
         let mut out = Vec::new();
         decompress(&mut Cursor::new(&nsz), &mut out, "t.nsz", &mut |_| {}).unwrap();
