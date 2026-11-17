@@ -75,8 +75,10 @@ class SetupTab(private val a: MainActivity, private val ui: Ui) : Tab {
         out.add(Check("Game host", dmhost.isFile, true, if (dmhost.isFile) "libdmhost.so, ${Catalog.human(dmhost.length())}" else "libdmhost.so is missing", "reinstall the app"))
         val xl = File(a.applicationInfo.nativeLibraryDir, "libdmsh_xlate.so")
         out.add(Check("Shader translator", xl.isFile && xl.canExecute(), true, if (xl.isFile) "libdmsh_xlate.so, ${Catalog.human(xl.length())}" else "not part of this build", "update the app: the shaders of many games cannot be built without it"))
-        val vk = a.packageManager.hasSystemFeature(PackageManager.FEATURE_VULKAN_HARDWARE_VERSION, 0x00403000)
-        out.add(Check("Vulkan 1.3", vk, true, if (vk) "the GPU driver offers Vulkan 1.3" else "this phone does not report Vulkan 1.3", "the games need a Vulkan 1.3 GPU driver"))
+        // Android's feature flag is what the phone maker declared and often says 1.1 for a driver that offers 1.3: the game host checks the real driver when a game starts
+        val pm = a.packageManager
+        val vk = listOf(0x00403000 to "1.3", 0x00402000 to "1.2", 0x00401000 to "1.1").firstOrNull { pm.hasSystemFeature(PackageManager.FEATURE_VULKAN_HARDWARE_VERSION, it.first) }?.second
+        out.add(Check("Vulkan", vk != null, true, when (vk) { null -> "this phone does not report Vulkan"; "1.3" -> "the phone reports Vulkan 1.3"; else -> "the phone reports Vulkan $vk (the games need a 1.3 driver; the declared level often lags the real one, so the host checks it when a game starts)" }, "the games need a Vulkan GPU driver"))
         val free = StatFs(a.filesDir.path).availableBytes
         out.add(Check("Free space", free >= 6_000_000_000L, false, Catalog.human(free) + " free", "about 6 GB plus the size of each game"))
         val mi = ActivityManager.MemoryInfo()

@@ -55,7 +55,7 @@ impl GameProfile {
 }
 
 pub const STATUSES: [&str; 4] = ["playable", "wip", "boots", "experimental"];
-const SINGLE: [&str; 6] = ["status", "tested", "package", "orientation", "requires", "sysdata"];
+const SINGLE: [&str; 7] = ["status", "tested", "package", "orientation", "requires", "sysdata", "romfs"];
 const REPEAT: [&str; 3] = ["setting", "env", "overlay"];
 const LAYOUTS: [&str; 2] = ["tablet", "phone"];
 
@@ -116,6 +116,28 @@ fn setting_ok(name: &str, value: &str) -> bool {
 }
 
 impl AndroidProfile {
+    /// The rows as they are, whatever they hold: unknown keys and repeats are kept out, nothing is checked. For a profile the strict parse refuses (a key a newer upstream added),
+    /// so that one game's row never hides the whole list.
+    pub fn parse_lenient(id: &str, text: &str) -> Self {
+        let mut rows: Vec<(String, String)> = Vec::new();
+        for line in text.lines() {
+            if line.trim().is_empty() || line.trim_start().starts_with('#') {
+                continue;
+            }
+            let (k, v) = line.split_once('\t').unwrap_or((line, ""));
+            let (k, v) = (k.trim(), v.trim());
+            if (SINGLE.contains(&k) && !rows.iter().any(|(rk, _)| rk == k)) || REPEAT.contains(&k) {
+                rows.push((k.to_string(), v.to_string()));
+            }
+        }
+        AndroidProfile { id: id.to_string(), rows }
+    }
+
+    /// `romfs zstd`: the profile's RomFS is meant to be stored packed (the porter's romfs_pack); this app stores it as it is.
+    pub fn romfs_zstd(&self) -> bool {
+        self.get("romfs", "") == "zstd"
+    }
+
     /// `path` is only for messages. `controls`: the control names of `dm/android/overlay_default.tsv`; when given, `overlay` rows are checked against them.
     pub fn parse(id: &str, path: &str, text: &str, controls: Option<&HashSet<String>>) -> Result<Self, ProfileError> {
         let mut rows: Vec<(String, String)> = Vec::new();
@@ -199,6 +221,10 @@ impl AndroidProfile {
                 bad.push(format!("sysdata {t:?}: a 16-digit hex title ID"));
             }
         }
+        let romfs = self.get("romfs", "");
+        if !romfs.is_empty() && romfs != "zstd" {
+            bad.push(format!("romfs {romfs:?}: zstd"));
+        }
         for v in self.values("setting") {
             let ok = v.split_once('=').map(|(k, val)| setting_ok(k, val)).unwrap_or(false);
             if !ok {
@@ -262,7 +288,8 @@ pub fn load_all(root: &Path, controls: Option<&HashSet<String>>) -> Result<Vec<(
         let a = d.join("android.tsv");
         let p = if a.is_file() {
             let text = fs::read_to_string(&a).map_err(|e| format!("{}: {e}", a.display()))?;
-            Some(AndroidProfile::parse(&g.id, &a.display().to_string(), &text, controls).map_err(|e| e.0)?)
+            // a profile the strict parse refuses still counts as a game (its readable rows are used), so one new key upstream never empties the list
+            Some(AndroidProfile::parse(&g.id, &a.display().to_string(), &text, controls).unwrap_or_else(|_| AndroidProfile::parse_lenient(&g.id, &text)))
         } else {
             None
         };
@@ -361,6 +388,11 @@ mod tests {
         assert_eq!(p.env(), vec!["DM_VK_ASYNC_PIPE=0", "DM_VK_PASS_TIMES=1"]);
         assert_eq!(p.settings(), vec![("opacity", "25"), ("docked", "1")]);
         assert_eq!(p.sysdata(), vec![0x0100000000000802]);
+        let z = AndroidProfile::parse("0100000000000000", "x", "status\tplayable\nromfs\tzstd\nfuture\tkey\n", None);
+        assert!(z.is_err(), "the strict parse still refuses an unknown key");
+        let l = AndroidProfile::parse_lenient("0100000000000000", "status\tplayable\nromfs\tzstd\nfuture\tkey\n");
+        assert!(l.romfs_zstd() && l.status() == "playable");
+        assert!(AndroidProfile::parse("0100000000000000", "x", "status\tplayable\nromfs\tzstd\n", None).unwrap().romfs_zstd());
     }
 
     #[test]
