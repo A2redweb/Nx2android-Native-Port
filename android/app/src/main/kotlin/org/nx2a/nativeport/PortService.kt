@@ -9,7 +9,9 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.IBinder
+import android.app.ActivityManager
 import android.os.ParcelFileDescriptor
+import android.os.PowerManager
 import org.json.JSONObject
 import java.io.File
 
@@ -21,6 +23,14 @@ object Ports {
 
 /** Runs one extraction as a foreground service, so it survives the screen turning off. The work itself is the Rust core's thread; this only keeps the process alive and shows progress. */
 class PortService : Service() {
+    /** One translator thread per ~1.5 GB of memory the system says is free, at most 4 and at most the cores: a thread killed for memory loses the whole port. */
+    private fun translatorThreads(): Int {
+        val mi = ActivityManager.MemoryInfo()
+        getSystemService(ActivityManager::class.java).getMemoryInfo(mi)
+        val byMem = (mi.availMem / (1536L shl 20)).toInt()
+        return minOf(Runtime.getRuntime().availableProcessors(), 4, byMem).coerceAtLeast(1)
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -30,8 +40,15 @@ class PortService : Service() {
         val updateName = intent.getStringExtra("updateName") ?: ""
 
         createChannel()
+        // how the last process ended (a kill for memory shows here), for the log a bug report needs
+        try {
+            getSystemService(ActivityManager::class.java).getHistoricalProcessExitReasons(packageName, 0, 3).forEach {
+                android.util.Log.i("nx2a", "previous process ${it.processName}: reason=${it.reason} (${it.description}) rss=${it.rss shr 20} MB")
+            }
+        } catch (_: Exception) {}
         startForeground(1, notification("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
 
+        val wake = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "nx2a:port").apply { setReferenceCounted(false); acquire(6 * 60 * 60 * 1000L) }
         Thread {
             val fds = ArrayList<ParcelFileDescriptor>()
             try {
@@ -62,6 +79,7 @@ class PortService : Service() {
                 android.util.Log.e("nx2a", "port failed", e)
             } finally {
                 fds.forEach { try { it.close() } catch (_: Exception) {} }
+                if (wake.isHeld) wake.release()
                 stopForeground(STOP_FOREGROUND_DETACH)
                 stopSelf(startId)
             }
@@ -87,7 +105,7 @@ class PortService : Service() {
         android.util.Log.i("nx2a", "rewrite: $rw")
         File(dst, "shaders.dmsv").delete()
         val xlate = File(applicationInfo.nativeLibraryDir, "libdmsh_xlate.so")
-        val sh = if (xlate.isFile) Core.nativeBuildShaders(File(filesDir, "games").path, id, dst.path, xlate.path, Runtime.getRuntime().availableProcessors().coerceIn(1, 4))
+        val sh = if (xlate.isFile) Core.nativeBuildShaders(File(filesDir, "games").path, id, dst.path, xlate.path, translatorThreads())
                  else "error: the shader translator is not part of this build"
         File(dst, "shaders.txt").writeText(sh + "\n")
         android.util.Log.i("nx2a", "shaders: $sh")
