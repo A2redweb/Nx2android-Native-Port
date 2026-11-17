@@ -677,9 +677,15 @@ fn unity_compute(x: &[u8], base: &str, common: &HashMap<u32, String>, trees: &mu
 
 /// Shaders and compute shaders in a UnityFS bundle or serialized file → `out`. NoTree when a type tree is missing (first pass).
 pub fn unity_shaders(d: &[u8], label: &str, common: &HashMap<u32, String>, trees: &mut Trees, borrowed: bool, out: &mut Vec<Found>) -> Result<(), UErr> {
-    let files = if d.get(..8) == Some(b"UnityFS\0") { bundle_files(d)? } else { vec![(String::new(), d.to_vec())] };
+    // a plain serialized file is read in place; only a bundle's nodes are new buffers
+    let files: Vec<(String, std::borrow::Cow<[u8]>)> = if d.get(..8) == Some(b"UnityFS\0") {
+        bundle_files(d)?.into_iter().map(|(n, v)| (n, std::borrow::Cow::Owned(v))).collect()
+    } else {
+        vec![(String::new(), std::borrow::Cow::Borrowed(d))]
+    };
     for (node, x) in files {
-        if !is_serialized(&x) {
+        let x: &[u8] = &x;
+        if !is_serialized(x) {
             continue;
         }
         let base = format!("{label}{}", if node.is_empty() { String::new() } else { format!(":{node}") });
@@ -695,8 +701,8 @@ pub fn unity_shaders(d: &[u8], label: &str, common: &HashMap<u32, String>, trees
             }
             Ok(())
         };
-        serialized_objects(&x, common, &[CLASS_SHADER], trees, &mut f)?;
-        unity_compute(&x, &base, common, trees, borrowed, out)?;
+        serialized_objects(x, common, &[CLASS_SHADER], trees, &mut f)?;
+        unity_compute(x, &base, common, trees, borrowed, out)?;
     }
     Ok(())
 }
