@@ -192,6 +192,8 @@ pub struct ExtractRequest {
     pub update_name: String,
     pub out_dir: String,
     pub tmp_dir: String,
+    /// add-on content dumps (path, file name): each one's RomFS goes to `<out_dir>/aoc/<index>/`, index = its title ID − the game's − 0x1000
+    pub dlc: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -250,7 +252,28 @@ fn run(job: &Arc<Job>, r: &ExtractRequest) -> Result<nx_extract::Report, String>
     set(job, |s| s.stage = "Extracting".into());
     let res = nx_extract::extract_game(base.package, upd.map(|u| u.package), &keys, Path::new(&r.out_dir)).map_err(|e| e.to_string());
     let _ = std::fs::remove_dir_all(&r.tmp_dir); // decompressed copies, if any
-    res
+    let rep = res?;
+    for (i, (path, name)) in r.dlc.iter().enumerate() {
+        set(job, |s| s.stage = format!("Add-on content {} of {}", i + 1, r.dlc.len()));
+        add_dlc(&keys, Path::new(&r.out_dir), rep.title_id, path, name, i, &mut progress)?;
+    }
+    Ok(rep)
+}
+
+/// One add-on content dump into `<out>/aoc/<index>/`. A DLC that belongs to another game is an error: the host would never mount it.
+fn add_dlc(keys: &nx_keys::Keys, out: &Path, app: u64, path: &str, name: &str, n: usize, progress: &mut dyn FnMut(u64)) -> Result<(), String> {
+    let pkg: Opened = nx_extract::open_path(Path::new(path), name, keys, Path::new(""), progress).map_err(|e| e.to_string())?;
+    let work = out.join("aoc").join(format!(".part{n}"));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let (tid, _) = nx_extract::extract_aoc(pkg.package, keys, &work).map_err(|e| format!("{name}: {e}"))?;
+    let Some(idx) = tid.checked_sub(app).and_then(|d| d.checked_sub(0x1000)).filter(|i| *i < 0x1000) else {
+        let _ = std::fs::remove_dir_all(&work);
+        return Err(format!("{name} is add-on content of {tid:016x}, not of {app:016x}"));
+    };
+    let dst = out.join("aoc").join(idx.to_string());
+    let _ = std::fs::remove_dir_all(&dst);
+    std::fs::rename(&work, &dst).map_err(|e| format!("{name}: {e}"))
 }
 
 /// Starts extracting a game on a background thread; returns the job number.

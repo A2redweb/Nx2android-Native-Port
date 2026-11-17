@@ -102,35 +102,63 @@ class MainActivity : Activity() {
         for (g in games) {
             val ready = File(g, "mods").isDirectory
             val nm = try { JSONObject(Core.nativeGames(File(filesDir, "games").path, "", false)).getJSONArray("games").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.firstOrNull { it.optString("id").equals(g.name, true) }?.optString("name") } } catch (_: Exception) { null }
-            list.addView(TextView(this).apply { text = (nm ?: g.name) + if (ready) "" else "\nextracted; the code-rewrite step is not built yet, so it cannot start"; setPadding(0, dp(8), 0, 0) })
+            list.addView(TextView(this).apply { text = (nm ?: g.name) + if (ready) "" else "\nextracted, but its code is not rewritten (see the log)"; setPadding(0, dp(8), 0, 0) })
             list.addView(button("Play") { startActivity(Intent(this@MainActivity, PlayActivity::class.java).putExtra(PlayActivity.EXTRA_GAME, g.name)) }.apply { isEnabled = ready })
         }
     }
 
+    private class Dump(val uri: Uri, val name: String, val mb: Long) {
+        /** The title ID in the file name, as dumpers write it: [0100…]. */
+        val id: Long? = Regex("\\[([0-9A-Fa-f]{16})]").find(name)?.groupValues?.get(1)?.toULong(16)?.toLong()
+        val version: Long = Regex("\\[v(\\d+)]", RegexOption.IGNORE_CASE).find(name)?.groupValues?.get(1)?.toLongOrNull() ?: -1
+        /** 0 base, 1 update, 2 add-on content (base …000, update …800, add-on content base + 0x1000 + n) */
+        val role: Int get() = when (val low = (id ?: 0L) and 0xFFFL) { 0L -> 0; 0x800L -> 1; else -> 2 }
+        val app: Long get() = (id ?: 0L) and 0x1FFFL.inv()
+    }
+
+    /** The dumps in the folder, grouped by game: one button ports the base with its newest update and all its add-on content. */
     private fun scan(tree: Uri) {
         val id = DocumentsContract.getTreeDocumentId(tree)
         val kids = DocumentsContract.buildChildDocumentsUriUsingTree(tree, id)
         val cols = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_SIZE)
-        var n = 0
+        val dumps = ArrayList<Dump>()
         try {
             contentResolver.query(kids, cols, null, null, null)?.use { c ->
                 while (c.moveToNext()) {
                     val name = c.getString(1) ?: continue
                     if (!Regex(".*\\.(nsp|nsz|xci|xcz)$", RegexOption.IGNORE_CASE).matches(name)) continue
-                    val uri = DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0))
-                    val mb = c.getLong(2) shr 20
-                    n++
-                    list.addView(TextView(this).apply { text = "$name ($mb MB)"; setPadding(0, dp(12), 0, 0) })
-                    val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                    row.addView(button("Port") { PortService.start(this@MainActivity, uri, name, null, "") })
-                    row.addView(button("Port with an update…") { pendingBase = uri to name; pick(REQ_UPDATE) })
-                    list.addView(row)
+                    dumps.add(Dump(DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0)), name, c.getLong(2) shr 20))
                 }
             }
         } catch (e: Exception) {
             list.addView(TextView(this).apply { text = "Cannot read the folder: ${e.message}" })
         }
-        if (n == 0) list.addView(TextView(this).apply { text = "No .nsp, .nsz, .xci or .xcz files in that folder (subfolders are not searched yet)." })
+        if (dumps.isEmpty()) {
+            list.addView(TextView(this).apply { text = "No .nsp, .nsz, .xci or .xcz files in that folder (subfolders are not searched yet)." })
+            return
+        }
+        val used = HashSet<Dump>()
+        val byApp = dumps.filter { it.id != null }.groupBy { it.app }
+        for ((_, g) in byApp.toSortedMap()) {
+            val base = g.firstOrNull { it.role == 0 } ?: continue
+            val update = g.filter { it.role == 1 }.maxWithOrNull(compareBy({ it.version }, { it.name }))
+            val dlc = g.filter { it.role == 2 }.sortedBy { it.name }
+            used.addAll(g)
+            val what = listOfNotNull(if (update != null) "update" + (if (update.version >= 0) " v${update.version}" else "") else null, if (dlc.isNotEmpty()) "${dlc.size} add-on" else null)
+            list.addView(TextView(this).apply { text = "${base.name} (${base.mb} MB)" + if (what.isEmpty()) "" else "\n+ " + what.joinToString(", "); setPadding(0, dp(12), 0, 0) })
+            list.addView(button("Port" + if (what.isEmpty()) "" else " with " + what.joinToString(" and ")) {
+                PortService.start(this@MainActivity, base.uri, base.name, update?.uri, update?.name ?: "", dlc.map { it.uri to it.name })
+            })
+            if (update != null) list.addView(button("Port the base only") { PortService.start(this@MainActivity, base.uri, base.name, null, "") })
+        }
+        // files whose name carries no title ID, or an update / add-on with no base beside it: one at a time, as before
+        for (d in dumps.filter { it !in used }) {
+            list.addView(TextView(this).apply { text = "${d.name} (${d.mb} MB)"; setPadding(0, dp(12), 0, 0) })
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(button("Port") { PortService.start(this@MainActivity, d.uri, d.name, null, "") })
+            row.addView(button("Port with an update…") { pendingBase = d.uri to d.name; pick(REQ_UPDATE) })
+            list.addView(row)
+        }
     }
 
     private fun showSupported() {

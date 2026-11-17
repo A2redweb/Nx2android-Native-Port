@@ -9,7 +9,7 @@ object Core {
     external fun nativeVersion(): String
     external fun nativeGames(dir: String, overlay: String, all: Boolean): String
     external fun nativeKeys(path: String): String
-    external fun nativeExtract(keys: String, base: String, baseName: String, update: String, updateName: String, out: String, tmp: String): Int
+    external fun nativeExtract(keys: String, base: String, baseName: String, update: String, updateName: String, out: String, tmp: String, dlc: String): Int
     external fun nativeStatus(id: Int): String
     /** Writes env.txt and settings.txt into a game's folder; returns an error text, empty when done. */
     external fun nativePrepare(profiles: String, id: String, dir: String, language: String): String

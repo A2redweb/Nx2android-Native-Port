@@ -38,6 +38,8 @@ class PortService : Service() {
         val baseName = intent.getStringExtra("baseName") ?: "game.nsp"
         val update = intent.getStringExtra("update") ?: ""
         val updateName = intent.getStringExtra("updateName") ?: ""
+        val dlc = intent.getStringArrayListExtra("dlc") ?: arrayListOf()
+        val dlcNames = intent.getStringArrayListExtra("dlcNames") ?: arrayListOf()
 
         createChannel()
         // how the last process ended (a kill for memory shows here), for the log a bug report needs
@@ -60,11 +62,17 @@ class PortService : Service() {
                     fds.add(ufd)
                     upath = "/proc/self/fd/${ufd.fd}"
                 }
+                val dlcLines = StringBuilder()
+                dlc.forEachIndexed { i, u ->
+                    val d = contentResolver.openFileDescriptor(Uri.parse(u), "r") ?: error("cannot open ${dlcNames.getOrNull(i)}")
+                    fds.add(d)
+                    dlcLines.append("/proc/self/fd/${d.fd}\t${dlcNames.getOrNull(i) ?: "dlc.nsp"}\n")
+                }
                 val stem = baseName.substringBeforeLast('.')
                 val out = File(filesDir, "ports/$stem").also { it.mkdirs() }
                 val tmp = File(cacheDir, "decompressed")
                 Ports.title = stem
-                val id = Core.nativeExtract(File(filesDir, "prod.keys").path, "/proc/self/fd/${bfd.fd}", baseName, upath, updateName, out.path, tmp.path)
+                val id = Core.nativeExtract(File(filesDir, "prod.keys").path, "/proc/self/fd/${bfd.fd}", baseName, upath, updateName, out.path, tmp.path, dlcLines.toString())
                 Ports.jobId = id
                 while (true) {
                     val s = JSONObject(Core.nativeStatus(id))
@@ -94,7 +102,8 @@ class PortService : Service() {
         dst.parentFile?.mkdirs()
         if (dst.exists()) File(dst, "RomFS").deleteRecursively().also { File(dst, "ExeFS").deleteRecursively() }
         dst.mkdirs()
-        for (n in listOf("RomFS", "ExeFS", "control.nacp", "icon.jpg")) File(out, n).takeIf { it.exists() }?.renameTo(File(dst, n))
+        if (File(out, "aoc").isDirectory) File(dst, "aoc").deleteRecursively()
+        for (n in listOf("RomFS", "ExeFS", "aoc", "control.nacp", "icon.jpg")) File(out, n).takeIf { it.exists() }?.renameTo(File(dst, n))
         File(dst, "name.txt").writeText(File(out, "name.txt").takeIf { it.exists() }?.readText() ?: stemOf(out))
         out.deleteRecursively()
         val err = Core.nativePrepare(File(filesDir, "games").path, id, dst.path, java.util.Locale.getDefault().toLanguageTag())
@@ -132,8 +141,10 @@ class PortService : Service() {
             .build()
 
     companion object {
-        fun start(ctx: Context, base: Uri, baseName: String, update: Uri?, updateName: String) {
+        fun start(ctx: Context, base: Uri, baseName: String, update: Uri?, updateName: String, dlc: List<Pair<Uri, String>> = emptyList()) {
             val i = Intent(ctx, PortService::class.java)
+                .putStringArrayListExtra("dlc", ArrayList(dlc.map { it.first.toString() }))
+                .putStringArrayListExtra("dlcNames", ArrayList(dlc.map { it.second }))
                 .putExtra("base", base.toString())
                 .putExtra("baseName", baseName)
                 .putExtra("update", update?.toString() ?: "")

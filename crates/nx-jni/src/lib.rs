@@ -68,6 +68,7 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeExtract(
     update_name: JString,
     out: JString,
     tmp: JString,
+    dlc: JString,
 ) -> i32 {
     let r = ExtractRequest {
         keys_path: get(env, keys),
@@ -77,6 +78,8 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeExtract(
         update_name: get(env, update_name),
         out_dir: get(env, out),
         tmp_dir: get(env, tmp),
+        // one add-on dump per line: path, a tab, its file name
+        dlc: get(env, dlc).lines().filter_map(|l| l.split_once('\t')).map(|(a, b)| (a.to_string(), b.to_string())).collect(),
     };
     nx_core::start_extract(r) as i32
 }

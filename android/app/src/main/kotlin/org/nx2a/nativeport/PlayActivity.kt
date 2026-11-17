@@ -19,6 +19,7 @@ class PlayActivity : GameActivity() {
         Os.setenv("DM_GAME_ROOT", root.path, true)
         Os.setenv("DM_SAVE", File(root, "save").path, true)
         Os.setenv("DM_TEMP", File(root, "temp").path, true)
+        File(root, "aoc").takeIf { it.isDirectory }?.let { Os.setenv("DM_AOC_DIR", it.path, true) }
         super.onCreate(savedInstanceState)
     }
 
