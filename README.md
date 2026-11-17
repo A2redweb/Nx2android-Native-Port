@@ -54,3 +54,10 @@ cargo run -p nxn -- verify prod.keys game.nsp        # hash trees: finds damaged
 ## Test device
 
 Poco X6, Adreno 710, Turnip driver, Android 16.
+
+## The app
+
+Package `unknownnone.nx2a.native`, with the icon and the dark design of the [nx2android phone app](https://github.com/A2redweb/nx2android-android-port), drawn with native views (no WebView).
+Tabs: **Setup** (checks, prod.keys), **Port** (game folder, found games grouped as base + newest update + DLC, options, file manager, free space), **Games** (ported games: Play / Delete; supported games), **Log** (stage, progress, Cancel, Copy log).
+The **Update** button (and a check at start) installs the newest build from the `nightly` pre-release over the running one; every build is signed with the debug key kept in `android/app/debug.keystore`, so updates install in place.
+What the phone app did through proot and adb is not needed here: no tools to download, no adb pairing, no APK to install, no data to copy by hand; the app runs the games itself. Not available yet: custom Vulkan drivers (libadrenotools is not bundled), FPSLocker configs for 60 fps (only profile frame-rate caps), experimental ports of games without a profile.
