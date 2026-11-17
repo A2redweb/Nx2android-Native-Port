@@ -219,7 +219,13 @@ struct Status {
 struct Job {
     status: Mutex<Status>,
     bytes: AtomicU64,
+    /// the size of the dumps being read, what `bytes` counts against
+    total: AtomicU64,
+    cancel: std::sync::atomic::AtomicBool,
 }
+
+/// The payload of the panic that stops an extraction a player cancelled
+struct Cancelled;
 
 fn jobs() -> &'static Mutex<HashMap<u32, Arc<Job>>> {
     static J: OnceLock<Mutex<HashMap<u32, Arc<Job>>>> = OnceLock::new();
@@ -238,16 +244,25 @@ fn run(job: &Arc<Job>, r: &ExtractRequest) -> Result<nx_extract::Report, String>
     if keys.header_key().is_none() {
         return Err("prod.keys has no header_key".into());
     }
-    let mut progress = |n: u64| {
-        job.bytes.fetch_add(n, Ordering::Relaxed);
-    };
+    let j = job.clone();
+    let progress: nx_extract::Progress = Arc::new(move |n: u64| {
+        if j.cancel.load(Ordering::Relaxed) {
+            std::panic::panic_any(Cancelled);
+        }
+        j.bytes.fetch_add(n, Ordering::Relaxed);
+    });
     set(job, |s| s.stage = "Opening the game".into());
-    let base: Opened = nx_extract::open_path(Path::new(&r.base_path), &r.base_name, &keys, Path::new(&r.tmp_dir), &mut progress).map_err(|e| e.to_string())?;
+    let base: Opened = nx_extract::open_counted(Path::new(&r.base_path), &r.base_name, &keys, Some(progress.clone())).map_err(|e| e.to_string())?;
+    job.total.fetch_add(base.total, Ordering::Relaxed);
     let upd = if r.update_path.is_empty() {
         None
     } else {
         set(job, |s| s.stage = "Opening the update".into());
-        Some(nx_extract::open_path(Path::new(&r.update_path), &r.update_name, &keys, Path::new(&r.tmp_dir), &mut progress).map_err(|e| e.to_string())?)
+        {
+            let u = nx_extract::open_counted(Path::new(&r.update_path), &r.update_name, &keys, Some(progress.clone())).map_err(|e| e.to_string())?;
+            job.total.fetch_add(u.total, Ordering::Relaxed);
+            Some(u)
+        }
     };
     set(job, |s| s.stage = "Extracting".into());
     let res = nx_extract::extract_game(base.package, upd.map(|u| u.package), &keys, Path::new(&r.out_dir)).map_err(|e| e.to_string());
@@ -255,14 +270,15 @@ fn run(job: &Arc<Job>, r: &ExtractRequest) -> Result<nx_extract::Report, String>
     let rep = res?;
     for (i, (path, name)) in r.dlc.iter().enumerate() {
         set(job, |s| s.stage = format!("Add-on content {} of {}", i + 1, r.dlc.len()));
-        add_dlc(&keys, Path::new(&r.out_dir), rep.title_id, path, name, i, &mut progress)?;
+        add_dlc(&keys, Path::new(&r.out_dir), rep.title_id, path, name, i, job, &progress)?;
     }
     Ok(rep)
 }
 
 /// One add-on content dump into `<out>/aoc/<index>/`. A DLC that belongs to another game is an error: the host would never mount it.
-fn add_dlc(keys: &nx_keys::Keys, out: &Path, app: u64, path: &str, name: &str, n: usize, progress: &mut dyn FnMut(u64)) -> Result<(), String> {
-    let pkg: Opened = nx_extract::open_path(Path::new(path), name, keys, Path::new(""), progress).map_err(|e| e.to_string())?;
+fn add_dlc(keys: &nx_keys::Keys, out: &Path, app: u64, path: &str, name: &str, n: usize, job: &Job, progress: &nx_extract::Progress) -> Result<(), String> {
+    let pkg: Opened = nx_extract::open_counted(Path::new(path), name, keys, Some(progress.clone())).map_err(|e| e.to_string())?;
+    job.total.fetch_add(pkg.total, Ordering::Relaxed);
     let work = out.join("aoc").join(format!(".part{n}"));
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
@@ -283,11 +299,13 @@ pub fn start_extract(r: ExtractRequest) -> u32 {
     let job = Arc::new(Job {
         status: Mutex::new(Status { state: State::Running, stage: "Starting".into(), message: String::new(), title_id: 0, name: String::new(), display_version: String::new(), exefs_files: 0, romfs_files: 0, romfs_bytes: 0 }),
         bytes: AtomicU64::new(0),
+        total: AtomicU64::new(0),
+        cancel: std::sync::atomic::AtomicBool::new(false),
     });
     if let Ok(mut m) = jobs().lock() {
         m.insert(id, job.clone());
     }
-    std::thread::spawn(move || match run(&job, &r) {
+    std::thread::spawn(move || match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&job, &r))).unwrap_or_else(|p| Err(if p.is::<Cancelled>() { "cancelled".to_string() } else { "the extraction stopped unexpectedly".to_string() })) {
         Ok(rep) => set(&job, |s| {
             s.state = State::Done;
             s.stage = "Done".into();
@@ -306,6 +324,13 @@ pub fn start_extract(r: ExtractRequest) -> u32 {
     id
 }
 
+/// Stops a job at its next read of the dump; its state becomes failed with the message `cancelled`.
+pub fn cancel(id: u32) {
+    if let Some(job) = jobs().lock().ok().and_then(|m| m.get(&id).cloned()) {
+        job.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
 /// The state of a job as JSON.
 pub fn status_json(id: u32) -> String {
     let job = jobs().lock().ok().and_then(|m| m.get(&id).cloned());
@@ -313,7 +338,7 @@ pub fn status_json(id: u32) -> String {
     let s = job.status.lock().map(|s| s.clone());
     let Ok(s) = s else { return "{\"error\":\"status unavailable\"}".into() };
     format!(
-        "{{\"id\":{id},\"state\":\"{}\",\"stage\":{},\"message\":{},\"bytes\":{},\"title_id\":\"{:016x}\",\"name\":{},\"display_version\":{},\"exefs_files\":{},\"romfs_files\":{},\"romfs_bytes\":{}}}",
+        "{{\"id\":{id},\"state\":\"{}\",\"stage\":{},\"message\":{},\"bytes\":{},\"total\":{},\"title_id\":\"{:016x}\",\"name\":{},\"display_version\":{},\"exefs_files\":{},\"romfs_files\":{},\"romfs_bytes\":{}}}",
         match s.state {
             State::Running => "running",
             State::Done => "done",
@@ -322,6 +347,7 @@ pub fn status_json(id: u32) -> String {
         json_str(&s.stage),
         json_str(&s.message),
         job.bytes.load(Ordering::Relaxed),
+        job.total.load(Ordering::Relaxed),
         s.title_id,
         json_str(&s.name),
         json_str(&s.display_version),

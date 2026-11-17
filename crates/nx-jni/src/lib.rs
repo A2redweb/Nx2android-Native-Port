@@ -85,6 +85,11 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeExtract(
 }
 
 #[no_mangle]
+pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeCancel(_env: JNIEnv, _c: JClass, id: i32) {
+    nx_core::cancel(id as u32);
+}
+
+#[no_mangle]
 pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeStatus(env: JNIEnv, _c: JClass, id: i32) -> JString {
     make(env, &nx_core::status_json(id as u32))
 }

@@ -112,26 +112,38 @@ impl<R: Read + Seek> Package<R> {
     }
 }
 
-/// The reader a dump is read through: the file itself, or, for an NSZ / XCZ, the NSP it stands for, decompressed only where it is read.
-pub enum Source {
+/// Called with the number of bytes each read of a dump returned; may panic to stop the extraction (the caller catches it).
+pub type Progress = std::sync::Arc<dyn Fn(u64) + Send + Sync>;
+
+enum Inner {
     File(std::io::BufReader<fs::File>),
     Lazy(std::io::BufReader<nx_nsz::LazyNsp>),
 }
 
+/// The reader a dump is read through: the file itself, or, for an NSZ / XCZ, the NSP it stands for, decompressed only where it is read.
+pub struct Source {
+    inner: Inner,
+    progress: Option<Progress>,
+}
+
 impl io::Read for Source {
     fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
-        match self {
-            Source::File(r) => r.read(b),
-            Source::Lazy(r) => r.read(b),
+        let n = match &mut self.inner {
+            Inner::File(r) => r.read(b)?,
+            Inner::Lazy(r) => r.read(b)?,
+        };
+        if let Some(p) = &self.progress {
+            p(n as u64);
         }
+        Ok(n)
     }
 }
 
 impl io::Seek for Source {
     fn seek(&mut self, p: io::SeekFrom) -> io::Result<u64> {
-        match self {
-            Source::File(r) => r.seek(p),
-            Source::Lazy(r) => r.seek(p),
+        match &mut self.inner {
+            Inner::File(r) => r.seek(p),
+            Inner::Lazy(r) => r.seek(p),
         }
     }
 }
@@ -139,6 +151,8 @@ impl io::Seek for Source {
 /// A dump from a path: an NSP or XCI as it is; an NSZ or XCZ through a reader that decompresses on demand, so nothing the size of the game is ever written out.
 pub struct Opened {
     pub package: Package<Source>,
+    /// the size of the dump's stream (decompressed, for an NSZ), what the progress counts against
+    pub total: u64,
 }
 
 impl Opened {
@@ -151,13 +165,22 @@ impl Opened {
 /// `name` is the dump's own file name (what decides whether it is compressed); `path` may be a descriptor path such as `/proc/self/fd/7` that has no extension.
 /// `tmp` and `progress` are kept for callers written when a compressed dump was decompressed to a file first; they are not used.
 pub fn open_path(path: &Path, name: &str, keys: &Keys, _tmp: &Path, _progress: &mut dyn FnMut(u64)) -> Result<Opened, Error> {
+    open_counted(path, name, keys, None)
+}
+
+/// [`open_path`] that reports the bytes read (`progress`).
+pub fn open_counted(path: &Path, name: &str, keys: &Keys, progress: Option<Progress>) -> Result<Opened, Error> {
     let shown = name.to_string();
     if !nx_nsz::is_compressed(Path::new(name)) {
         let f = fs::File::open(path).map_err(|e| Error::Msg(format!("{shown}: {e}")))?;
-        return Ok(Opened { package: Package::open(Source::File(std::io::BufReader::new(f)), keys, &shown)? });
+        let total = f.metadata().map(|m| m.len()).unwrap_or(0);
+        let src = Source { inner: Inner::File(std::io::BufReader::new(f)), progress };
+        return Ok(Opened { package: Package::open(src, keys, &shown)?, total });
     }
     let lazy = nx_nsz::LazyNsp::open(path, &shown).map_err(|e| Error::Msg(format!("{shown}: {e}")))?;
-    Ok(Opened { package: Package::open(Source::Lazy(std::io::BufReader::with_capacity(1 << 16, lazy)), keys, &shown)? })
+    let total = lazy.len();
+    let src = Source { inner: Inner::Lazy(std::io::BufReader::with_capacity(1 << 16, lazy)), progress };
+    Ok(Opened { package: Package::open(src, keys, &shown)?, total })
 }
 
 /// `fs_type` of a section header: RomFS.

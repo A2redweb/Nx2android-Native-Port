@@ -4,11 +4,15 @@ plugins {
 }
 
 android {
+    buildFeatures { buildConfig = true }
+    // one debug key kept in the repository, so every build is signed alike and installs over the last one (a fresh key per CI run would make each update a conflict)
+    signingConfigs { getByName("debug") { storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "androiddebugkey"; keyPassword = "android" } }
     namespace = "org.nx2a.nativeport"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "org.nx2a.nativeport"
+        applicationId = "unknownnone.nx2a.native" // the source package stays org.nx2a.nativeport (`native` is a Java keyword, so it cannot be a package name)
+        buildConfigField("String", "COMMIT", "\"${System.getenv("GITHUB_SHA")?.take(7) ?: "dev"}\"")
         minSdk = 29
         targetSdk = 36
         versionCode = 1
