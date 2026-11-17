@@ -16,7 +16,7 @@ rm -rf android/app/src/upstream-java && mkdir -p android/app/src/upstream-java/o
 cp "$src"/nxnative/dm/android/java/org/nx2a/*.java android/app/src/upstream-java/org/nx2a/
 # the universal host
 ANDROID_NDK_HOME=${HOST_NDK:?set HOST_NDK to NDK r27c} sh tools/build_universal_host.sh "$src" "${TMPDIR:-/tmp}/uw"
-cp "${TMPDIR:-/tmp}/uw/out/libdmhost.so" android/app/src/main/jniLibs/arm64-v8a/
+for l in libdmhost libadrenotools libhook_impl libmain_hook libfile_redirect_hook libgsl_alloc_hook; do cp "${TMPDIR:-/tmp}/uw/out/$l.so" android/app/src/main/jniLibs/arm64-v8a/; done
 # the shader translator, NativeAOT for bionic (UNPROVEN, see docs/SPIKE_DOTNET.md): shipped as an executable named like a library so Android extracts it to nativeLibraryDir, where the app may run it.
 # A build without dotnet or one that fails leaves it out; the app then says so instead of building shaders.
 if command -v dotnet >/dev/null 2>&1; then

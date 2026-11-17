@@ -110,6 +110,9 @@ patch('gfx/nvn/hle_nvn.c', 'api[1], m);\n#endif\n', 'api[1], m);\n    }\n')
 # one app, many games: the data folder of the selected game (DM_GAME_ROOT, set by the app before the library loads) replaces the activity's external files folder
 patch('android/front_android.c', 'snprintf(g_root, sizeof g_root, "%s", act->externalDataPath ? act->externalDataPath : act->internalDataPath);',
       'snprintf(g_root, sizeof g_root, "%s", getenv("DM_GAME_ROOT") ? getenv("DM_GAME_ROOT") : act->externalDataPath ? act->externalDataPath : act->internalDataPath);')
+# a driver the user added lives in the app's files folder, not beside the library: DM_VK_DRIVER_DIR (with a trailing slash) names that folder
+patch('android/gfx_vk_core.c', 'RTLD_NOW | RTLD_LOCAL, 1 /* ADRENOTOOLS_DRIVER_CUSTOM */, NULL, dir, dirs, drv, NULL, NULL)',
+      'RTLD_NOW | RTLD_LOCAL, 1 /* ADRENOTOOLS_DRIVER_CUSTOM */, NULL, dir, (getenv("DM_VK_DRIVER_DIR") && *getenv("DM_VK_DRIVER_DIR")) ? getenv("DM_VK_DRIVER_DIR") : dirs, drv, NULL, NULL)')
 # build.py: the game's two headers come from the generated ones, the game is called "universal"
 patch('android/build.py', "subprocess.run([sys.executable, str(DM / 'games/game.py'), 'header', a.game, str(gen / a.game / 'game_profile.h')], check=True)",
       "import shutil as _sh; _sh.copy(os.environ['UW_GEN'] + '/game_profile.h', gen / a.game / 'game_profile.h')")

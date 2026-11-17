@@ -36,6 +36,7 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
     private var extraUri: Uri? = null
     private var extraName = ""
     private val workInfo = ui.sm("Working files of earlier or stopped ports take space in the private storage of this app.")
+    private val driverBox = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
     private var entries: List<Entry> = emptyList()
     private var selected = -1
     private var loose: List<Dump> = emptyList()
@@ -58,7 +59,9 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         c2.addView(disabled("Experimental (game not ported yet, may not start)", "Every game with a profile is already ported. A game without a profile is extracted only."))
         c2.addView(ui.label("Update file (optional): used instead of an update found in the folder"))
         c2.addView(ui.fieldRow(extra, ui.button("Browse") { pickExtra() }.apply { (layoutParams as LinearLayout.LayoutParams).topMargin = 0 }))
-        c2.addView(disabled("Custom Vulkan driver (a Turnip / Mesa .so)", "Not in this app yet: the loader that runs a custom driver (libadrenotools) is not part of the build."))
+        c2.addView(ui.label("Vulkan driver for the games (a custom Turnip / Mesa build, .so or .zip)"))
+        c2.addView(driverBox)
+        c2.addView(ui.button("Add driver") { addDriver() })
         c2.addView(ui.label("Build jobs (lower uses less RAM)"))
         c2.addView(jobs)
         c2.addView(ui.button("Port", true) { port() })
@@ -76,6 +79,7 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         val col = ui.column(14)
         col.addView(c1); col.addView(c2); col.addView(c3); col.addView(c4)
         view = ui.scroll(col)
+        renderDrivers()
         prefs.getString("tree", null)?.let { folder.setText(Uri.parse(it).lastPathSegment ?: it); inspect() }
     }
 
@@ -84,6 +88,30 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         box.addView(CheckBox(a).apply { text = label; isEnabled = false; setTextColor(Theme.fg); buttonTintList = android.content.res.ColorStateList.valueOf(Theme.opt) })
         box.addView(ui.sm(why))
         return box
+    }
+
+    private fun renderDrivers() {
+        driverBox.removeAllViews()
+        val cur = Drivers.chosen(a)?.id
+        fun row(label: String, id: String?) {
+            val line = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+            line.addView(ui.check(label, id == cur) { on -> if (on) { Drivers.choose(a, id); renderDrivers() } }, LinearLayout.LayoutParams(0, -2, 1f))
+            if (id != null) line.addView(ui.button("Remove") { Drivers.remove(a, id); renderDrivers() })
+            driverBox.addView(line)
+        }
+        row("The phone's own driver", null)
+        Drivers.list(a).forEach { row(it.id, it.id) }
+        driverBox.addView(ui.sm("A driver that does not load, or has no Vulkan 1.3 GPU, is skipped and the game uses the phone's own; the Log shows which was used."))
+    }
+
+    private fun addDriver() {
+        a.pickFile { uri ->
+            val name = a.displayName(uri)
+            Thread {
+                val msg = try { "Added " + Drivers.add(a, uri, name) } catch (e: Exception) { "Could not add the driver: ${e.message}" }
+                a.runOnUiThread { renderDrivers(); insp.text = msg }
+            }.start()
+        }
     }
 
     private fun pickFolder() {
