@@ -20,7 +20,7 @@ class PlayActivity : GameActivity() {
         Os.setenv("DM_SAVE", File(root, "save").path, true)
         Os.setenv("DM_TEMP", File(root, "temp").path, true)
         File(root, "aoc").takeIf { it.isDirectory }?.let { Os.setenv("DM_AOC_DIR", it.path, true) }
-        Drivers.chosen(this)?.let {
+        Drivers.chosenFor(this, id)?.let {
             Os.setenv("DM_VK_DRIVER", it.lib, true)
             Os.setenv("DM_VK_DRIVER_DIR", it.dir.path + "/", true)
         }

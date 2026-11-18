@@ -73,6 +73,15 @@ pub fn rewrite_modules(profiles: &Path, cuts_tsv: &str, framestep_tsv: &str, id:
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let mut summary = vec![];
+    // the builds this profile registers: `build <version> <display> module=id …`
+    let registered: Vec<(String, Vec<(String, String)>)> = g
+        .values("build")
+        .into_iter()
+        .filter_map(|r| {
+            let ver = r.first()?.clone();
+            Some((ver, r.iter().skip(2).filter_map(|w| w.split_once('=')).map(|(a, b)| (a.to_string(), b.to_lowercase())).collect()))
+        })
+        .collect();
     for m in &modules {
         let src = game_dir.join("ExeFS").join(m);
         if !src.is_file() {
@@ -80,6 +89,14 @@ pub fn rewrite_modules(profiles: &Path, cuts_tsv: &str, framestep_tsv: &str, id:
         }
         let bytes = std::fs::read(&src).map_err(|e| format!("{m}: {e}"))?;
         let nso = nx_nso::Nso::parse(&bytes).map_err(|e| format!("{m}: {e}"))?;
+        if !registered.is_empty() {
+            let id_hex = nso.build_id_hex().to_lowercase();
+            let known = |b: &str| registered.iter().any(|(_, mods)| mods.iter().any(|(n, v)| n == m && b.starts_with(&v[..v.len().min(b.len())]) ));
+            if !known(&id_hex) {
+                let vers: Vec<&str> = registered.iter().map(|(v, _)| v.as_str()).collect();
+                summary.push(format!("[RED] {m}: build {} is not one this game's profile registers (versions {}); the game's patches do not apply to it and it will most likely not run: use the base game and update the profile was tested on", &id_hex[..16.min(id_hex.len())], vers.join(", ")));
+            }
+        }
         let list = cuts.get(&nso.build_id_hex()).map(Vec::as_slice).unwrap_or(&[]);
         let o = nx_rewrite::rewrite_with(&bytes, list, steps.get(&nso.build_id_hex()).map(Vec::as_slice).unwrap_or(&[])).map_err(|e| format!("{m}: {e}"))?;
         for (ext, data) in [("patched.bin", &o.patched[..]), ("fixups.tsv", o.fixups.as_bytes()), ("gates.tsv", o.gates.as_bytes()), ("sites.tsv", o.sites.as_bytes()), ("cuts.tsv", o.cuts.as_bytes()), ("obs.tsv", o.obs.as_bytes())] {

@@ -79,6 +79,7 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
             c.addView(ui.sm(notes.joinToString("\n") + (if (notes.isEmpty()) "" else "\n") + Catalog.human(Catalog.size(g)) + " on this phone"), ui.lp(top = 8))
             c.addView(ui.row(8,
                 ui.button("Play", true) { a.startActivity(Intent(a, PlayActivity::class.java).putExtra(PlayActivity.EXTRA_GAME, g.name)) }.also { it.isEnabled = ready; it.alpha = if (ready) 1f else 0.4f },
+                ui.button("Driver") { pickDriver(g.name, shown) },
                 ui.button("Delete") {
                     a.ask("Delete $shown from this phone? Its saves are deleted too. Port it again from your dump any time.", "Delete") {
                         Thread { g.deleteRecursively(); a.runOnUiThread { refresh() } }.start()
@@ -86,5 +87,15 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
                 }))
             list.addView(c)
         }
+    }
+
+    private fun pickDriver(game: String, shown: String) {
+        val drivers = Drivers.list(a)
+        val ids = listOf<String?>(null, "system") + drivers.map { it.id }
+        val labels = listOf("As for all games (Port tab)", "The phone's own driver") + drivers.map { it.id }
+        val cur = ids.indexOf(Drivers.ownChoice(a, game)).coerceAtLeast(0)
+        android.app.AlertDialog.Builder(a).setTitle("Vulkan driver for $shown")
+            .setSingleChoiceItems(labels.toTypedArray(), cur) { d, i -> Drivers.chooseFor(a, game, ids[i]); d.dismiss() }
+            .setNegativeButton("Cancel", null).show()
     }
 }

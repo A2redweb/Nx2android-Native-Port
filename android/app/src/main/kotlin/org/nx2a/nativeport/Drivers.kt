@@ -24,6 +24,19 @@ object Drivers {
         return list(c).firstOrNull { it.id == id }
     }
 
+    /** the driver for one game: its own choice if it has one ("system" = the phone's), else the one chosen for all games */
+    fun chosenFor(c: Context, game: String): Driver? {
+        val own = c.getSharedPreferences("nx2a", Context.MODE_PRIVATE).getString("driver_$game", null) ?: return chosen(c)
+        return if (own == "system") null else list(c).firstOrNull { it.id == own } ?: chosen(c)
+    }
+
+    /** null: as for all games; "system": the phone's own driver; else a driver id */
+    fun chooseFor(c: Context, game: String, id: String?) {
+        c.getSharedPreferences("nx2a", Context.MODE_PRIVATE).edit().apply { if (id == null) remove("driver_$game") else putString("driver_$game", id) }.apply()
+    }
+
+    fun ownChoice(c: Context, game: String): String? = c.getSharedPreferences("nx2a", Context.MODE_PRIVATE).getString("driver_$game", null)
+
     fun choose(c: Context, id: String?) {
         c.getSharedPreferences("nx2a", Context.MODE_PRIVATE).edit().apply { if (id == null) remove("driver") else putString("driver", id) }.apply()
     }

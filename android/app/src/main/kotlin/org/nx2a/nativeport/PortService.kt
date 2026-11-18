@@ -83,6 +83,7 @@ class PortService : Service() {
                     File(dst, "mods").deleteRecursively()   // an older port's code must not outlive a failed rewrite
                     val rw = Core.nativeRewrite(File(filesDir, "games").path, id, dst.path)
                     File(dst, "rewrite.txt").writeText(rw + "\n")
+                    rw.split("; ").filter { it.contains("[RED]") }.forEach { Ports.say(it.substringAfter("ok: ")) }
                     rw
                 }
                 step(3, 3, "Build the shaders", notify = stem) {

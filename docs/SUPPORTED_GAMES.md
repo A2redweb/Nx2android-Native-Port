@@ -20,7 +20,7 @@ A profile for a new game needs the game itself: its build IDs, shader tables and
 
 ## Supported by upstream (55 games)
 
-44 playable, 2 boot, 4 in progress, 5 experimental. Generated from upstream's Android profiles by `tools/make_games_doc.py`; "tested on" is what upstream recorded (game version and device), not a promise for every phone.
+44 playable, 5 experimental, 4 wip, 2 boots. Generated from upstream's Android profiles by `tools/make_games_doc.py`; "tested on" is what upstream recorded (game version and device), not a promise for every phone.
 
 | Game | Title ID | Status | Tested on | Needs |
 |---|---|---|---|---|
@@ -79,5 +79,3 @@ A profile for a new game needs the game itself: its build IDs, shader tables and
 | Untitled Goose Game | `010082400BCC6000` | playable | v458752 Lenovo Legion Y700 TB322FC (Snapdragon 8 Elite, Adreno 830, Android 16) | - |
 | Viractal | `0100FD501F95A000` | playable | v131072 Lenovo Legion Y700 TB322FC (Snapdragon 8 Elite, Adreno 830, Android 16) | - |
 | Xenoblade Chronicles 3 | `010074F013262000` | wip | v655360 Lenovo Legion Y700 TB322FC (Snapdragon 8 Elite, Adreno 830, Android 16) | - |
-
-Games upstream lists a profile for but not for Android yet (for example Fire Emblem: Three Houses until this app added it) can be tried with *Experimental*; they may not start.
