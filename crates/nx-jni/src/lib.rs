@@ -143,3 +143,10 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeFpsConvert(env
         Err(e) => format!("error: {e}"),
     })
 }
+
+/// The title ID of a dump read through `path` (a /proc/self/fd/N of the opened file), "" when none is found.
+#[no_mangle]
+pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeTitle(env: JNIEnv, _c: JClass, keys: JString, path: JString, name: JString) -> JString {
+    let r = nx_core::dump_title(&get(env, keys), &get(env, path), &get(env, name));
+    make(env, &r)
+}

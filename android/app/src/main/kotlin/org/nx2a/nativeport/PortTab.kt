@@ -14,7 +14,7 @@ import java.io.File
 class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
     private class Dump(val uri: Uri, val name: String, val bytes: Long) {
         /** the title ID in the file name, as dumpers write it: [0100…] */
-        val id: Long? = Regex("\\[([0-9A-Fa-f]{16})]").find(name)?.groupValues?.get(1)?.toULong(16)?.toLong()
+        var id: Long? = Regex("\\[([0-9A-Fa-f]{16})]").find(name)?.groupValues?.get(1)?.toULong(16)?.toLong()
         val version: Long = Regex("\\[v(\\d+)]", RegexOption.IGNORE_CASE).find(name)?.groupValues?.get(1)?.toLongOrNull() ?: -1
         /** 0 base, 1 update, 2 add-on content (base …000, update …800, add-on content base + 0x1000 + n) */
         val role: Int get() = when ((id ?: 0L) and 0xFFFL) { 0L -> 0; 0x800L -> 1; else -> 2 }
@@ -103,8 +103,8 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         val cur = Drivers.chosen(a)?.id
         fun row(label: String, id: String?) {
             val line = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
-            line.addView(ui.check(label, id == cur) { on -> if (on) { Drivers.choose(a, id); renderDrivers() } }, LinearLayout.LayoutParams(0, -2, 1f))
-            if (id != null) line.addView(ui.button("Remove") { Drivers.remove(a, id); renderDrivers() })
+            line.addView(ui.check(label, id == cur) { on -> if (on) { Drivers.choose(a, id); renderDrivers() } }.apply { layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) })
+            if (id != null) line.addView(ui.button("Remove") { Drivers.remove(a, id); renderDrivers() }.apply { layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT) })
             driverBox.addView(line)
         }
         row("The phone's own driver", null)
@@ -175,6 +175,16 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
                     }
                 }
             } catch (e: Exception) { problem = "Cannot read the folder: ${e.message}" }
+            // a file whose name has no [title ID] (or a wrong one): the title is read from the file itself (tickets, content meta headers)
+            val keys = File(a.filesDir, "prod.keys")
+            if (keys.isFile) for (d in dumps) {
+                try {
+                    a.contentResolver.openFileDescriptor(d.uri, "r")?.use { pfd ->
+                        val t = Core.nativeTitle(keys.path, "/proc/self/fd/${pfd.fd}", d.name)
+                        if (t.isNotEmpty()) d.id = t.toULong(16).toLong()
+                    }
+                } catch (_: Exception) {}
+            }
             val names = Catalog.byId(a)
             val found = ArrayList<Entry>()
             val used = HashSet<Dump>()

@@ -12,3 +12,4 @@ nx-rewrite = { path = "../nx-rewrite" }
 nx-nso = { path = "../nx-nso" }
 nx-shader = { path = "../nx-shader" }
 nx-fps = { path = "../nx-fps" }
+nx-nca = { path = "../nx-nca" }

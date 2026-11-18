@@ -496,3 +496,13 @@ pub fn fps_convert(game_dir: &Path, title_id: &str, text: &str, source: &str) ->
 pub fn fps_url(title_id: &str, build_id: &str) -> String {
     nx_fps::url(title_id, build_id)
 }
+
+/// The title ID (16 hex digits) of a dump, from its tickets or content meta headers, else a `[title ID]` in its name; "" when there is none. `path` is where the bytes can be read, `name` the file's own name.
+pub fn dump_title(keys_path: &str, path: &str, name: &str) -> String {
+    let keys = nx_keys::Keys::load(Path::new(keys_path)).ok();
+    let Ok(f) = std::fs::File::open(path) else { return String::new() };
+    match nx_nca::title_of(&mut std::io::BufReader::new(f), Path::new(name), keys.as_ref()) {
+        Ok(Some(t)) => format!("{:016X}", t.id),
+        _ => String::new(),
+    }
+}
