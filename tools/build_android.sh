@@ -36,5 +36,5 @@ if command -v dotnet >/dev/null 2>&1; then
     echo "WARNING: dmsh_xlate for bionic did not build; this APK cannot build shaders" >&2
   fi
 fi
-cd android && gradle --no-daemon assembleDebug
-echo "APK: $here/android/app/build/outputs/apk/debug/app-debug.apk"
+cd android && gradle --no-daemon assembleRelease
+echo "APK: $here/android/app/build/outputs/apk/release/app-release.apk"

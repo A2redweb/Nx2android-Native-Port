@@ -506,3 +506,41 @@ pub fn dump_title(keys_path: &str, path: &str, name: &str) -> String {
         _ => String::new(),
     }
 }
+
+#[cfg(test)]
+mod title_tests {
+    use super::dump_title;
+
+    fn pfs0(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let strs: Vec<u8> = files.iter().flat_map(|(n, _)| n.bytes().chain([0])).collect();
+        let mut out = b"PFS0".to_vec();
+        out.extend((files.len() as u32).to_le_bytes());
+        out.extend((strs.len() as u32).to_le_bytes());
+        out.extend(0u32.to_le_bytes());
+        let (mut off, mut so) = (0u64, 0u32);
+        for (n, d) in files {
+            out.extend(off.to_le_bytes());
+            out.extend((d.len() as u64).to_le_bytes());
+            out.extend(so.to_le_bytes());
+            out.extend(0u32.to_le_bytes());
+            off += d.len() as u64;
+            so += n.len() as u32 + 1;
+        }
+        out.extend(strs);
+        for (_, d) in files {
+            out.extend(*d);
+        }
+        out
+    }
+
+    #[test]
+    fn a_dump_without_a_title_in_its_name_is_found_by_its_ticket() {
+        let dir = std::env::temp_dir().join(format!("nx2a-title-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("Some Game.nsp");
+        // a ticket is named by the rights ID: the title ID, then the key generation
+        std::fs::write(&f, pfs0(&[("0100f43008c44800000000000000000a.tik", b"x"), ("a.nca", b"y")])).unwrap();
+        assert_eq!(dump_title("/nonexistent/prod.keys", f.to_str().unwrap(), "Some Game.nsp"), "0100F43008C44800");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

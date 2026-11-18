@@ -23,9 +23,11 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug") // a release signing key is not set up yet
+            signingConfig = signingConfigs.getByName("debug") // the one key kept in the repository (see above); a private release key is not set up yet
+            isDebuggable = false
         }
     }
+    lint { checkReleaseBuilds = false; abortOnError = false }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

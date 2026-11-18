@@ -59,7 +59,7 @@ Poco X6, Adreno 710, Turnip driver, Android 16.
 
 Package `unknownnone.nx2a.native`, with the icon and the dark design of the [nx2android phone app](https://github.com/A2redweb/nx2android-android-port), drawn with native views (no WebView).
 Tabs: **Setup** (checks, prod.keys), **Port** (game folder, found games grouped as base + newest update + DLC, options, file manager, free space), **Games** (ported games: Play / Delete; supported games), **Log** (stage, progress, Cancel, Copy log).
-The **Update** button (and a check at start) installs the newest build from the `nightly` pre-release over the running one; every build is signed with the debug key kept in `android/app/debug.keystore`, so updates install in place.
+The **Update** button (and a check at start) installs the newest build from the `nightly` pre-release over the running one; every build is a release build (not debuggable), signed with the key kept in `android/app/debug.keystore`, so updates install in place.
 What the phone app did through proot and adb is not needed here: no tools to download, no adb pairing, no APK to install, no data to copy by hand; the app runs the games itself. Custom Vulkan drivers (a Turnip .so or .zip) are added in the Port tab and loaded through libadrenotools (not yet tried on a device). 60 fps uses the profile's own frame-rate cap or the community's FPSLocker config of your build (downloaded at port time, converted by `nx-fps`; configs that need assembly patches or variables are refused, as upstream does). 
 
 **Not in this app (and why)**

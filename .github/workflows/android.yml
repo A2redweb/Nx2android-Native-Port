@@ -30,10 +30,10 @@ jobs:
       - run: pip install fonttools
       - run: sh tools/build_android.sh
       - uses: actions/upload-artifact@v4
-        with: { name: nx2android-native-debug, path: android/app/build/outputs/apk/debug/app-debug.apk }
+        with: { name: nx2android-native, path: android/app/build/outputs/apk/release/app-release.apk }
       - name: Inspect the APK
         run: |
-          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          APK=android/app/build/outputs/apk/release/app-release.apk
           BT="$ANDROID_HOME/build-tools/36.0.0"
           ls -l "$APK"
           unzip -l "$APK" | grep -E "lib/|classes|AndroidManifest|assets/games/" | head -20
@@ -47,7 +47,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk nx2android-native-debug.apk
-          gh release view nightly >/dev/null 2>&1 || gh release create nightly --prerelease --target "$GITHUB_SHA" --title "Nightly debug build" --notes "Debug APK of the latest commit on main. Untested on a device."
-          gh release upload nightly nx2android-native-debug.apk --clobber
-          gh release edit nightly --notes "Debug APK built from $GITHUB_SHA. Untested on a device."
+          cp android/app/build/outputs/apk/release/app-release.apk nx2android-native.apk
+          gh release view nightly >/dev/null 2>&1 || gh release create nightly --prerelease --target "$GITHUB_SHA" --title "Nightly build" --notes "APK of the latest commit on main. Untested on a device."
+          gh release delete-asset nightly nx2android-native-debug.apk -y 2>/dev/null || true
+          gh release upload nightly nx2android-native.apk --clobber
+          gh release edit nightly --notes "APK built from $GITHUB_SHA. Untested on a device."
