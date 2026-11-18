@@ -17,6 +17,27 @@ struct Line {
     text: String,
 }
 
+fn open_brackets(t: &str) -> i32 {
+    let mut q: Option<char> = None;
+    let mut d = 0;
+    for c in t.chars() {
+        match q {
+            Some(k) => {
+                if c == k {
+                    q = None;
+                }
+            }
+            None => match c {
+                '"' | '\'' => q = Some(c),
+                '[' => d += 1,
+                ']' => d -= 1,
+                _ => {}
+            },
+        }
+    }
+    d
+}
+
 fn strip_comment(l: &str) -> String {
     let mut q: Option<char> = None;
     let mut prev = ' ';
@@ -43,7 +64,7 @@ fn strip_comment(l: &str) -> String {
 }
 
 pub fn parse(text: &str) -> Result<Value, String> {
-    let mut lines = vec![];
+    let mut lines: Vec<Line> = vec![];
     for raw in text.trim_start_matches('\u{feff}').lines() {
         if raw.contains('\t') && raw.trim_start_matches(' ').starts_with('\t') {
             return Err("the config does not parse: a tab indents a line".into());
@@ -51,6 +72,14 @@ pub fn parse(text: &str) -> Result<Value, String> {
         let s = strip_comment(raw);
         if s.trim().is_empty() || s.trim() == "---" {
             continue;
+        }
+        // a flow list that goes on over several lines is joined into the line it began on
+        if let Some(last) = lines.last_mut() {
+            if open_brackets(&last.text) > 0 {
+                last.text.push(' ');
+                last.text.push_str(s.trim());
+                continue;
+            }
         }
         let indent = s.len() - s.trim_start().len();
         lines.push(Line { indent, text: s.trim_start().to_string() });

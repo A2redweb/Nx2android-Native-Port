@@ -2,7 +2,6 @@ package org.nx2a.nativeport
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Typeface
@@ -160,9 +159,7 @@ class MainActivity : Activity() {
 
     /** A dark confirm box; [cancelable] false makes it a plain message. */
     fun ask(msg: String, yes: String = "OK", cancelable: Boolean = true, onYes: () -> Unit) {
-        val b = AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setMessage(msg).setPositiveButton(yes) { _, _ -> onYes() }
-        if (cancelable) b.setNegativeButton("Cancel", null)
-        b.show()
+        Ui(this).dialog(message = msg, yes = yes, onYes = onYes, no = if (cancelable) "Cancel" else null).setCancelable(cancelable)
     }
 
     // ---- updates ----

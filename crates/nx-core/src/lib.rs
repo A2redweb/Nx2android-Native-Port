@@ -37,7 +37,8 @@ pub fn write_switch_files(profiles: &Path, id: &str, game_dir: &Path, language: 
         .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(id))
         .map(|e| e.path())
         .ok_or_else(|| format!("no profile for {id}"))?;
-    let text = std::fs::read_to_string(dir.join("android.tsv")).map_err(|e| format!("{id}: no android.tsv ({e})"))?;
+    // a game with no Android profile (an experimental port: it has the iOS profile's values only) gets the defaults upstream's porter writes for it
+    let text = std::fs::read_to_string(dir.join("android.tsv")).unwrap_or_else(|_| format!("status\texperimental\npackage\torg.nx2a.t{}\norientation\tlandscape\n", id.to_lowercase()));
     let p = nx_profile::AndroidProfile::parse(id, &dir.join("android.tsv").to_string_lossy(), &text, None).map_err(|e| e.0)?;
     let mut env = format!("# Written by Nx2Android Native for {id}; KEY=VALUE per line, read by the host at launch\nDM_LANG={language}\n");
     for r in p.env() {
@@ -180,7 +181,10 @@ pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<Stri
     let _ = std::fs::remove_dir_all(&work);
     if !rep.failed.is_empty() {
         let first: Vec<String> = rep.failed.iter().take(3).map(|(k, e)| format!("{k:016x}: {e}")).collect();
-        return Err(format!("{} of {} shaders failed; {}", rep.failed.len(), rep.expected.len(), first.join("; ")));
+        let mut te: Vec<(&String, &usize)> = rep.translator_errors.iter().collect();
+        te.sort_by(|a, b| b.1.cmp(a.1));
+        let why: Vec<String> = te.iter().take(4).map(|(l, n)| format!("{n}x {l}")).collect();
+        return Err(format!("{} of {} shaders failed; {}{}", rep.failed.len(), rep.expected.len(), first.join("; "), if why.is_empty() { String::new() } else { format!("; the translator said: {}", why.join(" | ")) }));
     }
     Ok(format!("{} shaders ({} unreadable files)", rep.emitted, skipped.len()))
 }

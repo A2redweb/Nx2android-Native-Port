@@ -94,8 +94,6 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         val ids = listOf<String?>(null, "system") + drivers.map { it.id }
         val labels = listOf("As for all games (Port tab)", "The phone's own driver") + drivers.map { it.id }
         val cur = ids.indexOf(Drivers.ownChoice(a, game)).coerceAtLeast(0)
-        android.app.AlertDialog.Builder(a).setTitle("Vulkan driver for $shown")
-            .setSingleChoiceItems(labels.toTypedArray(), cur) { d, i -> Drivers.chooseFor(a, game, ids[i]); d.dismiss() }
-            .setNegativeButton("Cancel", null).show()
+        ui.dialog(title = "Vulkan driver for $shown", items = labels, selected = cur, onPick = { i -> Drivers.chooseFor(a, game, ids[i]) })
     }
 }

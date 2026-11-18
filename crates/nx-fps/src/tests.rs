@@ -79,3 +79,12 @@ fn yaml_shapes() {
         ])
     );
 }
+
+#[test]
+fn a_list_over_several_lines() {
+    let v = yaml::parse("ALL_FPS:\n  - type: write\n    value: [\n      1, 2,\n      3\n    ]\n").unwrap();
+    assert_eq!(
+        v,
+        Value::Map(vec![("ALL_FPS".into(), Value::List(vec![Value::Map(vec![("type".into(), Value::Str("write".into())), ("value".into(), Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]))])]))])
+    );
+}

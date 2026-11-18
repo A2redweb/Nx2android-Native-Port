@@ -61,7 +61,7 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         c2.addView(noMenu)
         c2.addView(mtReplay)
         c2.addView(ui.sm("60 fps lifts the frame-rate cap when the game's profile has one; otherwise the community's FPSLocker config of your game's build is downloaded (needs internet) and applied when it can be."), ui.lp(bottom = 4))
-        c2.addView(disabled("Experimental (game not ported yet, may not start)", "Every game with a profile is already ported. A game without a profile is extracted only."))
+        c2.addView(ui.sm("A game with no Android profile of its own (one that only has the iOS profile's values) is ported as experimental: it may start with glitches or not at all."))
         c2.addView(ui.label("Update file (optional): used instead of an update found in the folder"))
         c2.addView(ui.fieldRow(extra, ui.button("Browse") { pickExtra() }.apply { (layoutParams as LinearLayout.LayoutParams).topMargin = 0 }))
         c2.addView(ui.label("Vulkan driver for the games (a custom Turnip / Mesa build, .so or .zip)"))
@@ -213,7 +213,7 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         if (e.dlc.isNotEmpty()) b.append("\n+ ").append(e.dlc.size).append(" add-on")
         b.append("\n").append(when {
             e.profile == null && e.base.id == null -> "the file name has no title ID: the game is found out when it is read"
-            e.profile == null -> "no profile in this app: it can be extracted, but not started yet"
+            e.profile == null -> "no Android profile yet: ported as experimental (from the iOS profile's values, if it has one), it may not start"
             else -> "profile: ${e.profile.status}"
         })
         return b.toString()

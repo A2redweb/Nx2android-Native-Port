@@ -45,7 +45,8 @@ class Ui(val c: Context) {
     fun row(gap: Int = 8, vararg views: View): LinearLayout = LinearLayout(c).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        views.forEachIndexed { i, v -> addView(v, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { topMargin = dp(8); if (i > 0) leftMargin = dp(gap) }) }
+        clipChildren = false; clipToPadding = false
+        views.forEachIndexed { i, v -> addView(v, LinearLayout.LayoutParams(0, dp(46), 1f).apply { topMargin = dp(8); if (i > 0) leftMargin = dp(gap) }) }
     }
 
     /** A row whose children keep their own width, the last one stretching (a field with its Browse button) */
@@ -146,5 +147,41 @@ class Ui(val c: Context) {
     fun scroll(content: View) = ScrollView(c).apply {
         isFillViewport = false
         addView(content, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    /**
+     * A box in the app's own look (dark card, red primary button), not the system's: a [title], a [message], a pick list ([items], [selected], picking one calls [onPick] and closes),
+     * and buttons: [yes] (red) and [no] (grey; null leaves it out).
+     */
+    fun dialog(title: String? = null, message: String? = null, items: List<String> = emptyList(), selected: Int = -1, onPick: (Int) -> Unit = {},
+               yes: String? = null, onYes: () -> Unit = {}, no: String? = "Cancel"): android.app.Dialog {
+        val dlg = android.app.Dialog(c)
+        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val box = column(16).apply { background = shape(Theme.card, 14, Theme.line) }
+        if (title != null) box.addView(text(title, 17f, Theme.fg, true), lp(bottom = 8))
+        if (message != null) box.addView(text(message, 14f, Theme.fg), lp(bottom = 8))
+        items.forEachIndexed { i, label ->
+            val on = i == selected
+            box.addView(TextView(c).apply {
+                text = label
+                setTextColor(Theme.fg)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = shape(Theme.field, 8, if (on) Theme.red else Theme.line)
+                setOnClickListener { dlg.dismiss(); onPick(i) }
+            }, lp(top = 6))
+        }
+        val buttons = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
+        if (no != null) buttons.addView(button(no) { dlg.dismiss() }.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { topMargin = dp(8); marginEnd = if (yes != null) dp(8) else 0 } })
+        if (yes != null) buttons.addView(button(yes, true) { dlg.dismiss(); onYes() }.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { topMargin = dp(8) } })
+        box.addView(buttons, lp(top = 8))
+        dlg.setContentView(box)
+        dlg.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            setLayout((c.resources.displayMetrics.widthPixels * 0.88f).toInt().coerceAtMost(dp(460)), ViewGroup.LayoutParams.WRAP_CONTENT)
+            setDimAmount(0.6f)
+        }
+        dlg.show()
+        return dlg
     }
 }

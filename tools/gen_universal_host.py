@@ -98,6 +98,17 @@ def patch(rel, old, new):
     f.write_text(s.replace(old, new), encoding='utf-8')
 patch('android/overlay_layout.h', 'static const ov_ctl OV_LAYOUTS[2][DM_AOV_N] = {{DM_AOV_TABLET}, {DM_AOV_PHONE}};',
       'static const ov_ctl OV_LAYOUTS_ALL[DM_NGAMES][2][DM_AOV_N] = {DM_AOV_ALL};\n#define OV_LAYOUTS (OV_LAYOUTS_ALL[g_dm_prof_index])')
+# the pause menu's Quit: the Resume row is split, Resume on the left and Quit on the right (a touch on the right half ends the game)
+patch('android/overlay_layout.h', 'OVM_AUDIO, OVM_RESUME, OVM_TAB, OVM_N };', 'OVM_AUDIO, OVM_RESUME, OVM_QUIT, OVM_TAB, OVM_N };')
+patch('android/gfx_vk_present.c', '"Audio output", "Resume", ""};', '"Audio output", "Resume", "Quit", ""};')
+patch('android/gfx_vk_present.c', 'cv_text(cv, r[0] + (rw - cv_text_w("Resume", is)) / 2, cy, "Resume", is, C_ACCENT); continue; }',
+      'cv_text(cv, r[0] + (rw / 2 - cv_text_w("Resume", is)) / 2, cy, "Resume", is, C_ACCENT); '
+      'cv_rrect(cv, r[0] + rw / 2 - 0.5f, r[1] + rh * 0.22f, r[0] + rw / 2 + 0.5f, r[1] + rh * 0.78f, 0.5f, C_LINE); '
+      'cv_text(cv, r[0] + rw / 2 + (rw / 2 - cv_text_w("Quit", is)) / 2, cy, "Quit", is, C_WHITE); continue; }')
+patch('android/front_android.c', '    int item = row >= 0 ? ov_menu_item(tab, row) : -1;\n    if (act == AMOTION_EVENT_ACTION_DOWN',
+      '    int item = row >= 0 ? ov_menu_item(tab, row) : -1;\n    if (item == OVM_RESUME && x > p[0] + p[2] * 0.5f) item = OVM_QUIT;   // the Resume row\'s right half\n    if (act == AMOTION_EVENT_ACTION_DOWN')
+patch('android/front_android.c', '    else if (item == OVM_AUDIO) { menu_audio(); }\n',
+      '    else if (item == OVM_AUDIO) { menu_audio(); }\n    else if (item == OVM_QUIT) { dm_haptics_android_tap(); act_finish(g_act); usleep(600000); _exit(0); }   // one game per process: the save is committed as the game writes it\n')
 patch('host/main.c', 'static const char *def[] = DM_GAME_MODULES;', 'const char *const *def = DM_GAME_MODULES;')
 patch('host/hle_sdk16.c', 'static const struct { const char *build, *ver; } k[] = {DM_GAME_DISPLAY_VERSIONS};', 'const __typeof__(g_dm_prof->versions[0]) *k = DM_GAME_DISPLAY_VERSIONS;')
 patch('host/hle_sdk16.c', 'j < sizeof k / sizeof *k; j++', 'j < (unsigned)DM_GAME_NVERSIONS; j++')
