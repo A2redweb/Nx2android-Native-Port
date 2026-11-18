@@ -149,8 +149,10 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
 
     private fun pickExtra() {
         a.pickFile { uri ->
+            val n = a.displayName(uri)
+            if (!Regex(".*\\.(nsp|nsz|xci|xcz)$", RegexOption.IGNORE_CASE).matches(n)) { insp.text = "The update file must be an .nsp, .nsz, .xci or .xcz (a driver goes under Add driver)."; return@pickFile }
             extraUri = uri
-            extraName = a.displayName(uri)
+            extraName = n
             extra.setText(extraName)
         }
     }
