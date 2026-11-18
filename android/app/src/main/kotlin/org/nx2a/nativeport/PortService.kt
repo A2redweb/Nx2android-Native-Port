@@ -187,9 +187,42 @@ class PortService : Service() {
                 f.writeText((old + "DM_FPS_TARGET=60").joinToString("\n") + "\n")
                 Ports.say("60 fps: the game profile's own frame-rate cap, at 60")
             } else {
-                Ports.say("60 fps: this game's profile has no frame-rate cap to lift, and the community FPSLocker configs are not supported in this app yet: the game keeps its own rate")
+                fpsConfig(id, dst)
             }
         }
+    }
+
+    /** 60 fps for a game whose profile has no cap: the community's FPSLocker config of this build (downloaded once, kept), converted for the host. */
+    private fun fpsConfig(id: String, dst: File) {
+        val plan = Core.nativeFpsPlan(dst.path, id)
+        if (!plan.startsWith("ok: ")) { Ports.say("60 fps: $plan"); return }
+        val (bid, url) = plan.removePrefix("ok: ").split('\t')
+        val cache = File(cacheDir, "fpslocker").apply { mkdirs() }
+        val f = File(cache, "$bid.yaml")
+        val none = File(cache, "$bid.none")
+        var text: String? = if (f.isFile) f.readText() else null
+        if (text == null && !none.exists()) {
+            try {
+                val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                c.connectTimeout = 20000; c.readTimeout = 30000; c.setRequestProperty("User-Agent", "nx2android-native")
+                when (c.responseCode) {
+                    200 -> { text = c.inputStream.bufferedReader().readText(); f.writeText(text) }
+                    404 -> none.writeText("")
+                    else -> Ports.say("60 fps: the config server answered ${c.responseCode}")
+                }
+            } catch (e: Exception) { Ports.say("60 fps: could not download the community's FPSLocker config (${e.message}); is the phone online?"); return }
+        }
+        if (text == null) { Ports.say("60 fps: the community has no FPSLocker config for this build of the game ($bid): the game keeps its own rate"); return }
+        val r = Core.nativeFpsConvert(dst.path, id, text, url)
+        if (!r.startsWith("ok: ")) {
+            File(dst, "fpslock.tsv").delete(); File(dst, "extra_cuts.tsv").delete()
+            Ports.say("[RED] 60 fps: the community config cannot be applied (${r.removePrefix("error: ")}): the game keeps its own rate")
+            return
+        }
+        val env = File(dst, "env.txt")
+        val old = if (env.exists()) env.readLines().filterNot { it.startsWith("DM_FPS_TARGET=") || it.startsWith("DM_FPS_LOCKS=") || it.startsWith("DM_PRESENT_INTERVAL=") } else emptyList()
+        env.writeText((old + "DM_FPS_TARGET=60" + "DM_FPS_LOCKS=${File(dst, "fpslock.tsv").path}" + "DM_PRESENT_INTERVAL=display").joinToString("\n") + "\n")
+        Ports.say("60 fps: FPSLocker config applied (${r.removePrefix("ok: ")})")
     }
 
     private fun step(k: Int, n: Int, name: String, notify: String, work: () -> String) {

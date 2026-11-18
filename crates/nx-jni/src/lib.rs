@@ -123,3 +123,23 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeBuildShaders(e
         Err(e) => format!("error: {e}"),
     })
 }
+
+/// The build ID of the game's main module ("ok: <32 hex>") and the warehouse URL of its FPSLocker config ("ok: <id>\t<url>").
+#[no_mangle]
+pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeFpsPlan(env: JNIEnv, _c: JClass, dir: JString, title_id: JString) -> JString {
+    let r = nx_core::fps_build_id(std::path::Path::new(&get(env, dir)));
+    make(env, &match r {
+        Ok(b) => format!("ok: {b}\t{}", nx_core::fps_url(&get(env, title_id), &b)),
+        Err(e) => format!("error: {e}"),
+    })
+}
+
+/// Converts the config text into the game folder's fpslock.tsv and extra_cuts.tsv. Returns "ok: <summary>" or "error: <what the host cannot apply>".
+#[no_mangle]
+pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeFpsConvert(env: JNIEnv, _c: JClass, dir: JString, title_id: JString, text: JString, source: JString) -> JString {
+    let r = nx_core::fps_convert(std::path::Path::new(&get(env, dir)), &get(env, title_id), &get(env, text), &get(env, source));
+    make(env, &match r {
+        Ok(s) => format!("ok: {s}"),
+        Err(e) => format!("error: {e}"),
+    })
+}

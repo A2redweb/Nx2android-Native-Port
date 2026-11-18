@@ -15,6 +15,7 @@ name = "nx-core"
 version = "0.1.0"
 dependencies = [
  "nx-extract",
+ "nx-fps",
  "nx-keys",
  "nx-nso",
  "nx-profile",
@@ -44,6 +45,10 @@ dependencies = [
  "nx-nca",
  "nx-nsz",
 ]
+
+[[package]]
+name = "nx-fps"
+version = "0.1.0"
 
 [[package]]
 name = "nx-fs"

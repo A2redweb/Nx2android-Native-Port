@@ -67,7 +67,10 @@ pub fn rewrite_modules(profiles: &Path, cuts_tsv: &str, framestep_tsv: &str, id:
     if modules.is_empty() {
         modules = ["main", "sdk"].map(String::from).to_vec();
     }
-    let cuts = nx_rewrite::cuts::parse(cuts_tsv)?;
+    // cuts the port added for this game (60 fps: the MASTER_WRITE bytes of an FPSLocker config) follow the shared table
+    let extra = std::fs::read_to_string(game_dir.join("extra_cuts.tsv")).unwrap_or_default();
+    let all_cuts = format!("{cuts_tsv}\n{extra}");
+    let cuts = nx_rewrite::cuts::parse(&all_cuts)?;
     let steps = nx_rewrite::framestep::parse(framestep_tsv)?;
     let tmp = game_dir.join("mods.tmp");
     let _ = std::fs::remove_dir_all(&tmp);
@@ -468,4 +471,28 @@ mod tests {
         assert!(s.contains("\"state\":\"failed\""), "{s}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// The build ID (32 hex digits) of the game's main module, which names its FPSLocker config.
+pub fn fps_build_id(game_dir: &Path) -> Result<String, String> {
+    let bytes = std::fs::read(game_dir.join("ExeFS/main")).map_err(|e| format!("ExeFS/main: {e}"))?;
+    Ok(nx_nso::Nso::parse(&bytes).map_err(|e| format!("main: {e}"))?.build_id_hex())
+}
+
+/// Converts the FPSLocker config text of the game's main build into fpslock.tsv (the host's rows) and extra_cuts.tsv (the rewriter's cuts) in the game's data folder.
+/// Err carries what the host cannot apply, which the port tells the player.
+pub fn fps_convert(game_dir: &Path, title_id: &str, text: &str, source: &str) -> Result<String, String> {
+    let bytes = std::fs::read(game_dir.join("ExeFS/main")).map_err(|e| format!("ExeFS/main: {e}"))?;
+    let nso = nx_nso::Nso::parse(&bytes).map_err(|e| format!("main: {e}"))?;
+    let image = nso.image(&bytes).map_err(|e| format!("main: {e}"))?;
+    let bid = nso.build_id_hex();
+    let _ = title_id;
+    let (tsv, cuts) = nx_fps::convert(text, &image, &bid, source).map_err(|e| e.0)?;
+    std::fs::write(game_dir.join("fpslock.tsv"), tsv).map_err(|e| e.to_string())?;
+    std::fs::write(game_dir.join("extra_cuts.tsv"), nx_fps::cuts_tsv(&bid, &cuts)).map_err(|e| e.to_string())?;
+    Ok(format!("{} memory write(s) at run time, {} code byte change(s)", std::fs::read_to_string(game_dir.join("fpslock.tsv")).map(|t| t.lines().filter(|l| l.starts_with("ALL_FPS")).count()).unwrap_or(0), cuts.len()))
+}
+
+pub fn fps_url(title_id: &str, build_id: &str) -> String {
+    nx_fps::url(title_id, build_id)
 }
