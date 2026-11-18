@@ -41,7 +41,7 @@ class PortService : Service() {
         val updateName = intent.getStringExtra("updateName") ?: ""
         val dlc = intent.getStringArrayListExtra("dlc") ?: arrayListOf()
         val dlcNames = intent.getStringArrayListExtra("dlcNames") ?: arrayListOf()
-        val opt = PortOptions(intent.getStringExtra("appName") ?: "", intent.getBooleanExtra("touch", false), intent.getBooleanExtra("fps60", false), intent.getIntExtra("jobs", 3))
+        val opt = PortOptions(intent.getStringExtra("appName") ?: "", intent.getBooleanExtra("touch", false), intent.getBooleanExtra("fps60", false), intent.getIntExtra("jobs", 3), intent.getBooleanExtra("noMenu", false), intent.getBooleanExtra("mtReplay", false))
 
         createChannel()
         // how the last process ended (a kill for memory shows here), for the log a bug report needs
@@ -168,6 +168,8 @@ class PortService : Service() {
         val err = Core.nativePrepare(games.path, id, dst.path, java.util.Locale.getDefault().toLanguageTag())
         if (err.isNotEmpty()) Ports.say("switch files: $err")
         applyOptions(games, id, dst, opt)
+        buttonFont(dst)
+        sharedFont(dst)
         if (!File(games, id).isDirectory) Ports.say("No game profile for $id: the files are extracted, but the game has no profile in this build, so it cannot start yet.")
         return id
     }
@@ -178,6 +180,12 @@ class PortService : Service() {
             val old = if (f.exists()) f.readLines().filterNot { it.startsWith("overlay=") } else emptyList()
             f.writeText((old + "overlay=0").joinToString("\n") + "\n")
             Ports.say("Touch game: the on-screen gamepad starts hidden")
+        }
+        for ((on, row) in listOf(opt.noMenuButton to "DM_MENU_BUTTON=0", opt.mtReplay to "DM_VK_MT_REPLAY=1")) {
+            val key = row.substringBefore('=') + "="
+            val env = File(dst, "env.txt")
+            val old = if (env.exists()) env.readLines().filterNot { it.startsWith(key) } else emptyList()
+            env.writeText((old + if (on) listOf(row) else emptyList()).joinToString("\n") + "\n")
         }
         if (opt.fps60) {
             val cap = File(games, "$id/game.tsv").takeIf { it.exists() }?.readLines()?.firstOrNull { it.startsWith("fps_target\t") }?.substringAfter('\t')?.trim()
@@ -190,6 +198,28 @@ class PortService : Service() {
                 fpsConfig(id, dst)
             }
         }
+    }
+
+    /** The stand-in for the console's Nintendo extension font (controller-button icons in game text), drawn when the app was built; the host reads it through DM_SHARED_FONT_EXT. */
+    private fun buttonFont(dst: File) {
+        try {
+            assets.open("nintendo_ext.ttf").use { i -> File(dst, "nintendo_ext.ttf").outputStream().use { i.copyTo(it) } }
+        } catch (_: java.io.IOException) { Ports.say("[RED] this build of the app has no button-icon font: the button icons in game text draw as ?"); return }
+        val env = File(dst, "env.txt")
+        val old = if (env.exists()) env.readLines().filterNot { it.startsWith("DM_SHARED_FONT_EXT=") } else emptyList()
+        env.writeText((old + "DM_SHARED_FONT_EXT=${File(dst, "nintendo_ext.ttf").path}").joinToString("\n") + "\n")
+    }
+
+    /** The player's own font (Chinese or Korean glyphs) for the console's shared fonts, instead of Android's Roboto: DM_SHARED_FONT. */
+    private fun sharedFont(dst: File) {
+        val src = File(filesDir, "shared_font.ttf")
+        val own = File(dst, "standard.ttf")
+        if (!src.isFile) { own.delete(); return }
+        src.copyTo(own, overwrite = true)
+        val env = File(dst, "env.txt")
+        val old = if (env.exists()) env.readLines().filterNot { it.startsWith("DM_SHARED_FONT=") } else emptyList()
+        env.writeText((old + "DM_SHARED_FONT=${own.path}").joinToString("\n") + "\n")
+        Ports.say("System font: your own font is used for the console's shared fonts")
     }
 
     /** 60 fps for a game whose profile has no cap: the community's FPSLocker config of this build (downloaded once, kept), converted for the host. */
@@ -266,7 +296,7 @@ class PortService : Service() {
                 .putExtra("appName", opt.appName)
                 .putExtra("touch", opt.touch)
                 .putExtra("fps60", opt.fps60)
-                .putExtra("jobs", opt.jobs)
+                .putExtra("jobs", opt.jobs).putExtra("noMenu", opt.noMenuButton).putExtra("mtReplay", opt.mtReplay)
             ctx.startForegroundService(i)
         }
     }

@@ -14,3 +14,4 @@ local.properties
 /android/app/src/main/assets/games/
 /android/local.properties
 android/app/src/upstream-java/
+android/app/src/main/assets/nintendo_ext.ttf

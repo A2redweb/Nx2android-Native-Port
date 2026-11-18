@@ -7,6 +7,10 @@ data class PortOptions(
     val fps60: Boolean = false,
     /** translator processes at once: fewer use less memory */
     val jobs: Int = 3,
+    /** no on-screen menu button: Back or the controller's Home/Menu opens the pause menu (DM_MENU_BUTTON=0) */
+    val noMenuButton: Boolean = false,
+    /** the game's Vulkan commands are recorded on a thread of their own (DM_VK_MT_REPLAY=1) */
+    val mtReplay: Boolean = false,
 )
 
 /** The running job's state, which the Log tab shows: the stage, its progress, and the log. One job at a time. */

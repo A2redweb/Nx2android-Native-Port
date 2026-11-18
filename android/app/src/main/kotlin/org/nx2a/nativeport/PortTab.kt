@@ -31,12 +31,15 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
     private val appName = ui.input("")
     private val touch = ui.check("Touch game (gamepad hidden)", prefs.getBoolean("opt_touch", false))
     private val fps60 = ui.check("60 fps", prefs.getBoolean("opt_fps60", false))
+    private val noMenu = ui.check("No on-screen menu button (Back opens the pause menu)", prefs.getBoolean("opt_nomenu", false))
+    private val mtReplay = ui.check("Multithreaded graphics replay (for a game that is slow on one thread)", prefs.getBoolean("opt_mt", false))
     private val jobs = ui.input("", number = true).apply { setText(prefs.getInt("opt_jobs", 3).toString()) }
     private val extra = ui.input("Optional: a separate update file").apply { isEnabled = false }
     private var extraUri: Uri? = null
     private var extraName = ""
     private val workInfo = ui.sm("Working files of earlier or stopped ports take space in the private storage of this app.")
     private val driverBox = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+    private val fontName = ui.input("The phone's own font").apply { isEnabled = false }
     private var entries: List<Entry> = emptyList()
     private var selected = -1
     private var loose: List<Dump> = emptyList()
@@ -55,6 +58,8 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         c2.addView(appName)
         c2.addView(touch)
         c2.addView(fps60)
+        c2.addView(noMenu)
+        c2.addView(mtReplay)
         c2.addView(ui.sm("60 fps lifts the frame-rate cap when the game's profile has one; otherwise the community's FPSLocker config of your game's build is downloaded (needs internet) and applied when it can be."), ui.lp(bottom = 4))
         c2.addView(disabled("Experimental (game not ported yet, may not start)", "Every game with a profile is already ported. A game without a profile is extracted only."))
         c2.addView(ui.label("Update file (optional): used instead of an update found in the folder"))
@@ -62,6 +67,9 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         c2.addView(ui.label("Vulkan driver for the games (a custom Turnip / Mesa build, .so or .zip)"))
         c2.addView(driverBox)
         c2.addView(ui.button("Add driver") { addDriver() })
+        c2.addView(ui.label("System font (optional .ttf for games that draw Chinese or Korean text with the console's font)"))
+        c2.addView(ui.fieldRow(fontName, ui.button("Choose") { pickFont() }.apply { (layoutParams as LinearLayout.LayoutParams).topMargin = 0 }))
+        c2.addView(ui.button("Use the phone's font") { File(a.filesDir, "shared_font.ttf").delete(); showFont() })
         c2.addView(ui.label("Build jobs (lower uses less RAM)"))
         c2.addView(jobs)
         c2.addView(ui.button("Port", true) { port() })
@@ -79,7 +87,7 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         val col = ui.column(14)
         col.addView(c1); col.addView(c2); col.addView(c3); col.addView(c4)
         view = ui.scroll(col)
-        renderDrivers()
+        renderDrivers(); showFont()
         prefs.getString("tree", null)?.let { folder.setText(Uri.parse(it).lastPathSegment ?: it); inspect() }
     }
 
@@ -102,6 +110,22 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         row("The phone's own driver", null)
         Drivers.list(a).forEach { row(it.id, it.id) }
         driverBox.addView(ui.sm("A driver that does not load, or has no Vulkan 1.3 GPU, is skipped and the game uses the phone's own; the Log shows which was used."))
+    }
+
+    private fun showFont() { fontName.setText(if (File(a.filesDir, "shared_font.ttf").isFile) prefs.getString("font_name", "your font") else "") }
+
+    private fun pickFont() {
+        a.pickFile { uri ->
+            val name = a.displayName(uri)
+            if (!name.endsWith(".ttf", true)) { insp.text = "Choose a .ttf font (one font, not a collection)."; return@pickFile }
+            Thread {
+                try {
+                    a.contentResolver.openInputStream(uri)!!.use { i -> File(a.filesDir, "shared_font.ttf").outputStream().use { i.copyTo(it) } }
+                    prefs.edit().putString("font_name", name).apply()
+                } catch (e: Exception) { a.runOnUiThread { insp.text = "Could not read the font: ${e.message}" } }
+                a.runOnUiThread { showFont() }
+            }.start()
+        }
     }
 
     private fun addDriver() {
@@ -201,8 +225,8 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
 
     private fun options(): PortOptions {
         val j = (jobs.text.toString().toIntOrNull() ?: 3).coerceIn(1, 8)
-        prefs.edit().putBoolean("opt_touch", touch.isChecked).putBoolean("opt_fps60", fps60.isChecked).putInt("opt_jobs", j).apply()
-        return PortOptions(appName.text.toString(), touch.isChecked, fps60.isChecked, j)
+        prefs.edit().putBoolean("opt_touch", touch.isChecked).putBoolean("opt_fps60", fps60.isChecked).putBoolean("opt_nomenu", noMenu.isChecked).putBoolean("opt_mt", mtReplay.isChecked).putInt("opt_jobs", j).apply()
+        return PortOptions(appName.text.toString(), touch.isChecked, fps60.isChecked, j, noMenu.isChecked, mtReplay.isChecked)
     }
 
     private fun port() {
