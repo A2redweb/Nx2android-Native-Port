@@ -19,6 +19,7 @@ dependencies = [
  "nx-keys",
  "nx-nca",
  "nx-nso",
+ "nx-nsz",
  "nx-profile",
  "nx-rewrite",
  "nx-shader",

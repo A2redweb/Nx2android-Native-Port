@@ -116,7 +116,7 @@ impl<R: Read + Seek> Package<R> {
 pub type Progress = std::sync::Arc<dyn Fn(u64) + Send + Sync>;
 
 enum Inner {
-    File(std::io::BufReader<fs::File>),
+    File(std::io::BufReader<nx_nsz::PosFile>),
     Lazy(std::io::BufReader<nx_nsz::LazyNsp>),
 }
 
@@ -172,8 +172,8 @@ pub fn open_path(path: &Path, name: &str, keys: &Keys, _tmp: &Path, _progress: &
 pub fn open_counted(path: &Path, name: &str, keys: &Keys, progress: Option<Progress>) -> Result<Opened, Error> {
     let shown = name.to_string();
     if !nx_nsz::is_compressed(Path::new(name)) {
-        let f = fs::File::open(path).map_err(|e| Error::Msg(format!("{shown}: {e}")))?;
-        let total = f.metadata().map(|m| m.len()).unwrap_or(0);
+        let f = nx_nsz::PosFile::open(path).map_err(|e| Error::Msg(format!("{shown}: {e}")))?;
+        let total = f.len().unwrap_or(0);
         let src = Source { inner: Inner::File(std::io::BufReader::new(f)), progress };
         return Ok(Opened { package: Package::open(src, keys, &shown)?, total });
     }

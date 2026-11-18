@@ -4,7 +4,7 @@
 //! The name check `decompress` makes (the SHA-256 of each NCA) cannot be made on pieces; the NCA headers' own hash tables are what `nxn verify` checks.
 
 use super::*;
-use std::fs::File;
+use crate::posfile::PosFile as File;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Receiver};
 

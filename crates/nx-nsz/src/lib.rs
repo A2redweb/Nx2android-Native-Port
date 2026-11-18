@@ -11,7 +11,9 @@ use nx_zstd::Decoder;
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 
 mod lazy;
+mod posfile;
 pub use lazy::LazyNsp;
+pub use posfile::PosFile;
 
 const HEAD: u64 = 0x4000;
 const EXPECT_NAME_LEN: usize = 32;
