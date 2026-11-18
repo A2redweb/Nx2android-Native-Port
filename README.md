@@ -60,4 +60,13 @@ Poco X6, Adreno 710, Turnip driver, Android 16.
 Package `unknownnone.nx2a.native`, with the icon and the dark design of the [nx2android phone app](https://github.com/A2redweb/nx2android-android-port), drawn with native views (no WebView).
 Tabs: **Setup** (checks, prod.keys), **Port** (game folder, found games grouped as base + newest update + DLC, options, file manager, free space), **Games** (ported games: Play / Delete; supported games), **Log** (stage, progress, Cancel, Copy log).
 The **Update** button (and a check at start) installs the newest build from the `nightly` pre-release over the running one; every build is signed with the debug key kept in `android/app/debug.keystore`, so updates install in place.
-What the phone app did through proot and adb is not needed here: no tools to download, no adb pairing, no APK to install, no data to copy by hand; the app runs the games itself. Custom Vulkan drivers (a Turnip .so or .zip) are added in the Port tab and loaded through libadrenotools (not yet tried on a device). 60 fps uses the profile's own frame-rate cap or the community's FPSLocker config of your build (downloaded at port time, converted by `nx-fps`; configs that need assembly patches or variables are refused, as upstream does). Not available yet: experimental ports of games without a profile.
+What the phone app did through proot and adb is not needed here: no tools to download, no adb pairing, no APK to install, no data to copy by hand; the app runs the games itself. Custom Vulkan drivers (a Turnip .so or .zip) are added in the Port tab and loaded through libadrenotools (not yet tried on a device). 60 fps uses the profile's own frame-rate cap or the community's FPSLocker config of your build (downloaded at port time, converted by `nx-fps`; configs that need assembly patches or variables are refused, as upstream does). 
+
+**Not in this app (and why)**
+- Experimental ports of games without an upstream profile: upstream's porter surveys the game and guesses a profile, then needs rounds of on-device runs; the app extracts such a game but cannot start it.
+- Shaders of Unreal Engine and KTGL games (and other engines without a reader): upstream makes those on a connected device through adb; here they are skipped and the Games tab says so.
+- Firmware system data (`--firmware`): only the console's own shared fonts use it; the host's stand-in fonts (or your own .ttf, Port tab) are used instead.
+- A game build the profile does not register: the port warns in red; upstream derives a profile for such a build, this app does not.
+- Alias-region headroom, the external-display gamepad and spin-wait copies in the rewriter (performance only), and the one function (Final Fantasy Resonance) the rewriter cannot rewrite.
+
+Nothing in this app has been run on a phone beyond the Setup screen: expect bugs in the untested stages.
