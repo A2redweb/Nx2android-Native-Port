@@ -13,6 +13,10 @@ for t in dmsh_xlate:nxnative/dm/gfx/tools/dmsh_xlate; do
   name="${t%%:*}"; proj="${t#*:}"
   # The SDK has no NativeAOT runtime pack of its own for linux-bionic-arm64: it restores the glibc one (linux-arm64), whose sdk/ assemblies the compiler then misses ("The PrivateSdkAssemblies
   # ItemGroup is required"). NuGet has the bionic pack under its own ID, so it is fetched at the compiler's version and named by hand.
+  # no System.Security.Cryptography on Android without a JVM (it needs libssl): the two SHA-256 calls use a managed one
+  cp "$(dirname "$0")/dotnet/ManagedSha256.cs" "$SRC/$proj/ManagedSha256.cs"
+  sed -i 's/System\.Security\.Cryptography\.SHA256\.HashData(/ManagedSha256.HashData(/g' "$SRC/$proj/Program.cs"
+  ! grep -q 'System.Security.Cryptography' "$SRC/$proj/Program.cs" || { echo "Program.cs still uses System.Security.Cryptography" >&2; exit 1; }
   dotnet restore "$SRC/$proj" -r linux-bionic-arm64 -p:PublishAot=true -nologo -v quiet
   VER="$(ls "$HOME/.nuget/packages/microsoft.dotnet.ilcompiler" | sort -V | tail -1)"
   PACK_ID=microsoft.netcore.app.runtime.nativeaot.linux-bionic-arm64
