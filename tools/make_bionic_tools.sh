@@ -16,6 +16,10 @@ for t in dmsh_xlate:nxnative/dm/gfx/tools/dmsh_xlate; do
   # no System.Security.Cryptography on Android without a JVM (it needs libssl): the two SHA-256 calls use a managed one
   cp "$(dirname "$0")/dotnet/ManagedSha256.cs" "$SRC/$proj/ManagedSha256.cs"
   sed -i 's/System\.Security\.Cryptography\.SHA256\.HashData(/ManagedSha256.HashData(/g' "$SRC/$proj/Program.cs"
+  # NativeAOT has no reflection to find a JSON converter: JsonArray.Add<int>(h) fails ("JsonTypeInfo metadata for type 'System.Int32' was not provided"), which dropped every shader with a 1D texel fetch
+  # (323 of Fire Emblem: Three Houses's 1342). A JsonNode made from the int by its operator has the converter built in.
+  sed -i 's/f1\.Add(h);/f1.Add((JsonNode)h);/' "$SRC/$proj/Program.cs"
+  grep -q 'f1.Add((JsonNode)h);' "$SRC/$proj/Program.cs" || { echo "the JSON fix did not apply to Program.cs" >&2; exit 1; }
   ! grep -q 'System.Security.Cryptography' "$SRC/$proj/Program.cs" || { echo "Program.cs still uses System.Security.Cryptography" >&2; exit 1; }
   dotnet restore "$SRC/$proj" -r linux-bionic-arm64 -p:PublishAot=true -nologo -v quiet
   VER="$(ls "$HOME/.nuget/packages/microsoft.dotnet.ilcompiler" | sort -V | tail -1)"
