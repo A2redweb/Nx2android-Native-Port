@@ -36,6 +36,13 @@ class PlayActivity : GameActivity() {
             if (last.contains("CRASH sig=11") && last.contains("attachment-less pass")) mark.writeText("1")   // kept: the next runs do not go back to the crash
             if (mark.exists()) Os.setenv("DM_VK_X_NOTARGET", "0", true)
         } catch (_: Exception) {}
+        // settings the player (or whoever is helping) typed in the game's sheet: KEY=VALUE lines, applied last
+        try {
+            File(root, "env_user.txt").takeIf { it.isFile }?.readLines()?.forEach { l ->
+                val m = Regex("^\\s*([A-Z][A-Z0-9_]*)=(.*)$").find(l) ?: return@forEach
+                Os.setenv(m.groupValues[1], m.groupValues[2].trim(), true)
+            }
+        } catch (_: Exception) {}
         super.onCreate(savedInstanceState)
     }
 

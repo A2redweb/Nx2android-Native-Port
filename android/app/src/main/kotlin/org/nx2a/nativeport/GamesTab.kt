@@ -121,6 +121,7 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
             action(box, "Driver", "Which Vulkan driver draws this game: the phone's own, or a custom one you added in the Port tab. A custom driver fixes many crashes on Adreno.") { pickDriver(g.name, shown) }
             action(box, "Saves", "Import a save from Nx2android/exported saves/$shown, or from any folder. Saves are exported from the game's pause menu.") { saves(shown) }
             action(box, "Update shaders", "Some shaders are in no game file: the game saves them as it meets them. This translates those in, so the next start draws what was left out. It takes a few minutes.") { updateShaders(g, shown) }
+            action(box, "Extra settings", "For testing: host switches as KEY=VALUE lines (for example DM_FPS_TARGET=30), applied the next time the game starts. Leave empty for the normal setup.") { extraSettings(g, shown) }
             action(box, "Log link", "Uploads this game's log to a public paste site and copies the link, so anyone you send it to can read what went wrong. It holds no keys.") { shareLog(g, shown) }
             action(box, "Delete", "Removes the game from this phone, with its saves. Port it again from your dump any time.") {
                 a.ask("Delete $shown from this phone? Its saves are deleted too. Port it again from your dump any time.", "Delete") {
@@ -152,6 +153,28 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
             val m = a.resources.displayMetrics
             setLayout((m.widthPixels * 0.92f).toInt().coerceAtMost(ui.dp(480)), (m.heightPixels * 0.88f).toInt())
             setDimAmount(0.6f)
+        }
+        dlg.show()
+    }
+
+    private fun extraSettings(g: File, shown: String) {
+        val f = File(g, "env_user.txt")
+        val dlg = android.app.Dialog(a)
+        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val box = ui.column(16).apply { background = ui.shape(Theme.card, 14, Theme.line) }
+        box.addView(ui.text("Extra settings for $shown", 17f, Theme.fg, true), ui.lp(bottom = 8))
+        val et = ui.input("KEY=VALUE, one per line").apply { setSingleLine(false); minLines = 4; gravity = android.view.Gravity.TOP; setText(if (f.isFile) f.readText() else "") }
+        box.addView(et)
+        box.addView(ui.row(8, ui.button("Cancel") { dlg.dismiss() }, ui.button("Save", true) {
+            val t = et.text.toString().trim()
+            if (t.isEmpty()) f.delete() else f.writeText(t + "\n")
+            dlg.dismiss()
+        }))
+        dlg.setContentView(box)
+        dlg.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            setLayout((a.resources.displayMetrics.widthPixels * 0.9f).toInt().coerceAtMost(ui.dp(460)), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
         dlg.show()
     }
