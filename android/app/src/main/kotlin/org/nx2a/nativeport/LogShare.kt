@@ -17,7 +17,7 @@ object LogShare {
         for (f in listOf("rewrite.txt", "shaders.txt")) File(dir, f).takeIf { it.isFile }?.let { sb.append("\n== ").append(f).append(" ==\n").append(it.readText().trim()).append('\n') }
         File(dir, "port.log").takeIf { it.isFile }?.let { sb.append("\n== port log ==\n").append(it.readText().trim()).append('\n') }
         val fmt = java.text.SimpleDateFormat("d MMM HH:mm:ss", java.util.Locale.US)
-        for (f in listOf("log.txt", "log.prev.txt")) File(ext, f).takeIf { ext != null && it.isFile }?.let {   // the host's own log: the last two runs of any game
+        for (f in listOf("log.txt", "log.prev.txt")) File(dir, f).takeIf { it.isFile }?.let {   // the host's own log: the last two runs of any game
             sb.append("\n== game output: ").append(f).append(" (written ").append(fmt.format(java.util.Date(it.lastModified()))).append(") ==\n").append(it.readText().trim().takeLast(120_000)).append('\n')
         }
         sb.append("\n== system log, crash lines only ==\n").append(logcat())
