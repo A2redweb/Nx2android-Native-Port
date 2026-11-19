@@ -9,14 +9,18 @@ import java.net.URL
 object LogShare {
     private const val MAX = 400_000
 
-    fun gameLog(dir: File, shown: String): String {
+    fun gameLog(dir: File, shown: String, ext: File?): String {
         val sb = StringBuilder()
         sb.append("nx2android native · build ").append(BuildConfig.COMMIT).append('\n')
         sb.append("game: ").append(shown).append(" (").append(dir.name).append(")\n")
         sb.append("device: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append(", Android ").append(Build.VERSION.RELEASE).append('\n')
         for (f in listOf("rewrite.txt", "shaders.txt")) File(dir, f).takeIf { it.isFile }?.let { sb.append("\n== ").append(f).append(" ==\n").append(it.readText().trim()).append('\n') }
         File(dir, "port.log").takeIf { it.isFile }?.let { sb.append("\n== port log ==\n").append(it.readText().trim()).append('\n') }
-        sb.append("\n== game output (this app's logcat) ==\n").append(logcat())
+        val fmt = java.text.SimpleDateFormat("d MMM HH:mm:ss", java.util.Locale.US)
+        for (f in listOf("log.txt", "log.prev.txt")) File(ext, f).takeIf { ext != null && it.isFile }?.let {   // the host's own log: the last two runs of any game
+            sb.append("\n== game output: ").append(f).append(" (written ").append(fmt.format(java.util.Date(it.lastModified()))).append(") ==\n").append(it.readText().trim().takeLast(120_000)).append('\n')
+        }
+        sb.append("\n== system log, crash lines only ==\n").append(logcat())
         return if (sb.length > MAX) sb.substring(0, 20_000) + "\n…cut…\n" + sb.substring(sb.length - (MAX - 20_000)) else sb.toString()
     }
 
@@ -24,7 +28,8 @@ object LogShare {
         val p = ProcessBuilder("logcat", "-d", "-t", "4000").redirectErrorStream(true).start()
         val t = p.inputStream.bufferedReader().readText()
         p.waitFor()
-        t.ifBlank { "(empty)" }
+        val keep = Regex("Fatal signal|SIGSEGV|SIGABRT|AndroidRuntime|FATAL|dmhost|libdm|nx2a|backtrace|#\\d\\d pc ")
+        t.lineSequence().filter { keep.containsMatchIn(it) }.joinToString("\n").takeLast(60_000).ifBlank { "(none)" }
     } catch (e: Exception) { "(logcat not readable: ${e.message})" }
 
     /** uploads [text] and returns the link; tries paste.rs, then dpaste.org */

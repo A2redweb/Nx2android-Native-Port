@@ -105,7 +105,7 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         ui.dialog(title = "Copy a link to this game's log", message = "The log of $shown (its port and its output) is uploaded to a public paste site, and the link is copied. Anyone with the link can read it. It holds no keys, only what the app printed.",
             yes = "Upload", onYes = {
                 Thread {
-                    val r: Any = try { LogShare.upload(LogShare.gameLog(g, shown)) } catch (e: Exception) { Pair("", e.message) }
+                    val r: Any = try { LogShare.upload(LogShare.gameLog(g, shown, a.getExternalFilesDir(null))) } catch (e: Exception) { Pair("", e.message) }
                     a.runOnUiThread {
                         if (r is String) {
                             a.getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("log link", r))
