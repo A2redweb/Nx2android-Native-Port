@@ -168,6 +168,32 @@ pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<Stri
     let (mut index, skipped) = nx_shader::scan::scan_dir(&roots, common, std::sync::Arc::new(nx_shader::container::zs_dicts(&game_dir.join("RomFS"))?), &work.join("spool.bin"), threads, &|d, t| progress("scanning", d, t))?;
     // shaders the game set while it ran, whose code no game file holds: saved by an earlier play (captured_shaders/), translated in now
     let (captured, cap_notes) = index.add_captures(&game_dir.join("captured_shaders"))?;
+    // Game Freak's packs (Z-A's arc/data.trpfs, Arceus's .gfpak files): their members are Oodle-compressed and only the game's own decoder opens them; the host built as an
+    // executable runs it (libdmhost_exe.so beside the translator), and what the members hold is added to the index
+    let mut pack_note = String::new();
+    let arcs = nx_shader::pack::archives(&game_dir.join("RomFS"));
+    if !arcs.is_empty() {
+        let exe = std::path::Path::new(xlate.first().map(String::as_str).unwrap_or("")).parent().map(|p| p.join("libdmhost_exe.so"));
+        let host = exe.filter(|e| e.is_file()).map(|exe| nx_shader::pack::HostSpec { exe, mods: game_dir.join("mods"), cwd: game_dir.to_path_buf(), game: id.to_string(), log_dir: game_dir.join("decoder-logs") });
+        match host {
+            Some(h) if h.mods.is_dir() => {
+                let mut ap = index.appender()?;
+                let r = nx_shader::pack::scan_archives(&arcs, &h, threads.min(3), &mut ap, &|d, t| progress("decoding the game's archives", d, t));
+                let added = ap.finish()?;
+                match r {
+                    Ok(o) => {
+                        pack_note = format!(", {added} from the game's archives ({} files read{})", o.members, if o.failed > 0 { format!(", {} did not decode", o.failed) } else { String::new() });
+                        if !o.notes.is_empty() {
+                            pack_note.push_str(&format!("; [RED] {}", o.notes.join("; ")));
+                        }
+                    }
+                    Err(e) => pack_note = format!(", {added} from the game's archives; [RED] the decoder stopped: {e} (see decoder-logs)"),
+                }
+            }
+            Some(_) => pack_note = "; [RED] the game's archives are Oodle-compressed and the game's code is not rewritten yet (the decoder runs it)".into(),
+            None => pack_note = "; [RED] the game's archives are Oodle-compressed and this build has no decoder (libdmhost_exe.so)".into(),
+        }
+    }
     let params = nx_shader::pipeline::Params {
         xlate,
         work: work.join("xlate"),
@@ -190,7 +216,7 @@ pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<Stri
     }
     let cap = if captured > 0 { format!(", {captured} captured while playing") } else { String::new() };
     let bad = if cap_notes.is_empty() { String::new() } else { format!("; [RED] {}", cap_notes.iter().take(3).cloned().collect::<Vec<_>>().join("; ")) };
-    Ok(format!("{} shaders ({} unreadable files{cap}){bad}", rep.emitted, skipped.len()))
+    Ok(format!("{} shaders ({} unreadable files{cap}{pack_note}){bad}", rep.emitted, skipped.len()))
 }
 
 /// The games list as JSON (`{"games":[...]}`) or `{"error":"..."}`. `overlay` is the text of upstream's `overlay_default.tsv`, when the controls should be validated.

@@ -16,7 +16,7 @@ rm -rf android/app/src/upstream-java && mkdir -p android/app/src/upstream-java/o
 cp "$src"/nxnative/dm/android/java/org/nx2a/*.java android/app/src/upstream-java/org/nx2a/
 # the universal host
 ANDROID_NDK_HOME=${HOST_NDK:?set HOST_NDK to NDK r27c} sh tools/build_universal_host.sh "$src" "${TMPDIR:-/tmp}/uw"
-for l in libdmhost libadrenotools libhook_impl libmain_hook libfile_redirect_hook libgsl_alloc_hook; do cp "${TMPDIR:-/tmp}/uw/out/$l.so" android/app/src/main/jniLibs/arm64-v8a/; done
+for l in libdmhost libdmhost_exe libadrenotools libhook_impl libmain_hook libfile_redirect_hook libgsl_alloc_hook; do cp "${TMPDIR:-/tmp}/uw/out/$l.so" android/app/src/main/jniLibs/arm64-v8a/; done
 # the button-icon font (stand-in for the console's Nintendo extension font; game-independent), drawn once here as upstream's porter does, so the app needs no Python
 mkdir -p android/app/src/main/assets
 rm -f android/app/src/main/assets/nintendo_ext.ttf

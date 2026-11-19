@@ -54,6 +54,13 @@ impl Index {
         Ok((added, notes))
     }
 
+    /// Opens the spool for appending shaders found after the scan (the packs' members, decoded by the game's own decoder)
+    pub fn appender(&mut self) -> Result<Appender<'_>, String> {
+        let w = std::fs::OpenOptions::new().append(true).open(&self.spool).map_err(|e| e.to_string())?;
+        let pos = w.metadata().map_err(|e| e.to_string())?.len();
+        Ok(Appender { idx: self, w: BufWriter::new(w), pos, added: 0 })
+    }
+
     pub fn load(&self, key: u64) -> Result<(Vec<u8>, Vec<u8>), String> {
         let e = self.ents.get(&key).ok_or_else(|| format!("no shader {key:016x}"))?;
         let mut f = File::open(&self.spool).map_err(|x| x.to_string())?;
@@ -111,6 +118,9 @@ pub fn scan_dir(roots: &[(PathBuf, String)], common: Option<HashMap<u32, String>
         walk(root, &mut v).map_err(|e| format!("{}: {e}", root.display()))?;
         for p in v {
             let rel = p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+            if rel.ends_with(".trpfs") {
+                continue; // Trinity packs are read member by member (pack.rs), not as one file
+            }
             files.push((p, format!("{prefix}/{rel}")));
         }
     }
@@ -238,5 +248,34 @@ mod tests {
         let (idx, skipped) = scan_dir(&[(root.clone(), "".into())], Some(HashMap::new()), Default::default(), &root.join("spool"), 2, &|_, _| {}).unwrap();
         assert_eq!((idx.ents.len(), skipped.len()), (0, 1));
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+pub struct Appender<'a> {
+    idx: &'a mut Index,
+    w: BufWriter<File>,
+    pos: u64,
+    pub added: usize,
+}
+
+impl Appender<'_> {
+    pub fn add(&mut self, f: Found) -> Result<(), String> {
+        let key = skey(&f.ctl, &f.code);
+        if let Some(old) = self.idx.ents.get(&key) {
+            if old.code_len as usize != f.code.len() {
+                return Err(format!("key {key:016x} is the same but the code area differs ({} / {})", f.label, old.label));
+            }
+            return Ok(());
+        }
+        self.w.write_all(&f.ctl).and_then(|_| self.w.write_all(&f.code)).map_err(|e| e.to_string())?;
+        self.idx.ents.insert(key, Ent { stage: f.stage, label: f.label, off: self.pos, ctl_len: f.ctl.len() as u32, code_len: f.code.len() as u32 });
+        self.pos += (f.ctl.len() + f.code.len()) as u64;
+        self.added += 1;
+        Ok(())
+    }
+
+    pub fn finish(mut self) -> Result<usize, String> {
+        self.w.flush().map_err(|e| e.to_string())?;
+        Ok(self.added)
     }
 }

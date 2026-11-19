@@ -8,3 +8,4 @@ pub mod job;
 pub mod pipeline;
 pub mod lzma;
 pub mod unity;
+pub mod pack;
