@@ -14,6 +14,7 @@ version = "0.1.0"
 name = "nx-core"
 version = "0.1.0"
 dependencies = [
+ "nx-dmsv",
  "nx-extract",
  "nx-fps",
  "nx-keys",

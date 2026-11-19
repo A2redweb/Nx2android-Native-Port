@@ -127,6 +127,36 @@ fn find_profile(profiles: &Path, id: &str) -> Result<std::path::PathBuf, String>
         .ok_or_else(|| format!("no profile for {id}"))
 }
 
+/// The SPIR-V and reflection of shaders of the game's `shaders.dmsv`, as text (base64), for `keys` (hex keys separated by spaces): what a bug report about a shader needs
+pub fn shader_dump(game_dir: &Path, keys: &str) -> String {
+    fn b64(d: &[u8]) -> String {
+        const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut o = String::with_capacity(d.len() * 4 / 3 + 4);
+        for c in d.chunks(3) {
+            let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+            for i in 0..4 {
+                if i <= c.len() { o.push(A[(n >> (18 - 6 * i) & 63) as usize] as char) } else { o.push('=') }
+            }
+        }
+        o
+    }
+    let bytes = match std::fs::read(game_dir.join("shaders.dmsv")) { Ok(b) => b, Err(e) => return format!("no shader bundle: {e}") };
+    let bundle = match nx_dmsv::Bundle::parse(&bytes) { Ok(b) => b, Err(e) => return e };
+    let mut out = String::new();
+    for k in keys.split_whitespace() {
+        let Ok(key) = u64::from_str_radix(k, 16) else { continue };
+        if key == 0 { continue }
+        match bundle.find(key) {
+            None => out.push_str(&format!("{k}: not in the bundle\n")),
+            Some(e) => match bundle.spv(e) {
+                Ok(spv) => out.push_str(&format!("{k} stage {} spv {} bytes\nspv {}\nrefl {}\n", e.stage, spv.len(), b64(&spv), b64(bundle.refl(e)))),
+                Err(x) => out.push_str(&format!("{k}: {x}\n")),
+            },
+        }
+    }
+    out
+}
+
 /// Builds `shaders.dmsv` of the game's data folder from the shaders in its RomFS: the profile's facts and handle remaps, the translator `xlate` (its command words) and a scratch folder.
 /// Returns a one-line summary; fails when any shader that was meant to be in the bundle is missing from it.
 pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<String>, threads: usize, progress: &(dyn Fn(&str, usize, usize) + Sync)) -> Result<String, String> {

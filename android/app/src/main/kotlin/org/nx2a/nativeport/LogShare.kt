@@ -20,6 +20,11 @@ object LogShare {
         for (f in listOf("log.txt", "log.prev.txt")) File(dir, f).takeIf { it.isFile }?.let {   // the host's own log: the last two runs of any game
             sb.append("\n== game output: ").append(f).append(" (written ").append(fmt.format(java.util.Date(it.lastModified()))).append(") ==\n").append(it.readText().trim().takeLast(120_000)).append('\n')
         }
+        // the shaders a crash was in (the host names them), so the crash can be looked at without the game
+        File(dir, "log.txt").takeIf { it.isFile }?.let { f ->
+            val keys = Regex("graphics pipeline, shaders ([0-9a-f]{16}) ([0-9a-f]{16}) ([0-9a-f]{16})|compute pipeline, shader ([0-9a-f]{16})").findAll(f.readText()).flatMap { m -> m.groupValues.drop(1).filter { it.isNotEmpty() } }.distinct().take(6).toList()
+            if (keys.isNotEmpty()) try { sb.append("\n== shaders of the crash (SPIR-V, base64) ==\n").append(Core.nativeShaderDump(dir.path, keys.joinToString(" "))) } catch (e: Throwable) { sb.append("(shader dump failed: ${e.message})\n") }
+        }
         sb.append("\n== system log, crash lines only ==\n").append(logcat())
         return if (sb.length > MAX) sb.substring(0, 20_000) + "\n…cut…\n" + sb.substring(sb.length - (MAX - 20_000)) else sb.toString()
     }

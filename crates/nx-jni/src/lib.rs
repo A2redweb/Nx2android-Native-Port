@@ -144,6 +144,13 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeFpsConvert(env
     })
 }
 
+/// The SPIR-V (base64) of the given shader keys of a game's bundle.
+#[no_mangle]
+pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeShaderDump(env: JNIEnv, _c: JClass, dir: JString, keys: JString) -> JString {
+    let r = nx_core::shader_dump(std::path::Path::new(&get(env, dir)), &get(env, keys));
+    make(env, &r)
+}
+
 /// The title ID of a dump read through `path` (a /proc/self/fd/N of the opened file), "" when none is found.
 #[no_mangle]
 pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeTitle(env: JNIEnv, _c: JClass, keys: JString, path: JString, name: JString) -> JString {
