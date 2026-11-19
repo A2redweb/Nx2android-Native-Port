@@ -59,6 +59,7 @@ class PortService : Service() {
             val fds = ArrayList<ParcelFileDescriptor>()
             val out = File(filesDir, "ports/$stem").also { it.mkdirs() }
             var ok = false
+            var gameDir: File? = null
             try {
                 Ports.say("Port of $baseName" + (if (updateName.isNotEmpty()) " with $updateName" else "") + (if (dlc.isNotEmpty()) " and ${dlc.size} add-on dump(s)" else ""))
                 if (!File(filesDir, "prod.keys").isFile) throw Failure("prod.keys is not set: open the Setup tab and choose it")
@@ -79,6 +80,7 @@ class PortService : Service() {
                 val titleId = extract(bfd, baseName, upath, updateName, out, dlcLines.toString())
                 val id = install(out, titleId, stem, opt)
                 val dst = File(filesDir, "data/$id")
+                gameDir = dst
                 step(2, 3, "Rewrite the game's code", notify = stem) {
                     File(dst, "mods").deleteRecursively()   // an older port's code must not outlive a failed rewrite
                     val rw = Core.nativeRewrite(File(filesDir, "games").path, id, dst.path)
@@ -105,6 +107,7 @@ class PortService : Service() {
                 fail("${e.javaClass.simpleName}: ${e.message}")
             } finally {
                 fds.forEach { try { it.close() } catch (_: Exception) {} }
+                gameDir?.takeIf { it.isDirectory }?.let { try { File(it, "port.log").writeText(Ports.text()) } catch (_: Exception) {} }
                 if (!ok) out.deleteRecursively()
                 if (wake.isHeld) wake.release()
                 Ports.running = false

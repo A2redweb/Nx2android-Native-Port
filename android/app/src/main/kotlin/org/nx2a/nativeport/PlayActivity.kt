@@ -19,6 +19,11 @@ class PlayActivity : GameActivity() {
         Os.setenv("DM_GAME_ROOT", root.path, true)
         Os.setenv("DM_SAVE", File(root, "save").path, true)
         Os.setenv("DM_TEMP", File(root, "temp").path, true)
+        if (Saves.access()) {   // exports and the import list live where the player can open them
+            val shown = File(root, "name.txt").takeIf { it.exists() }?.readText()?.trim()?.ifEmpty { null } ?: id
+            val d = Saves.dirFor(shown)
+            if (d.isDirectory || d.mkdirs()) Os.setenv("DM_SAVES_DIR", d.path, true)
+        }
         File(root, "aoc").takeIf { it.isDirectory }?.let { Os.setenv("DM_AOC_DIR", it.path, true) }
         Drivers.chosenFor(this, id)?.let {
             Os.setenv("DM_VK_DRIVER", it.lib, true)

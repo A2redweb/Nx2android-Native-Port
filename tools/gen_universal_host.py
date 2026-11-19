@@ -98,6 +98,12 @@ def patch(rel, old, new):
     f.write_text(s.replace(old, new), encoding='utf-8')
 patch('android/overlay_layout.h', 'static const ov_ctl OV_LAYOUTS[2][DM_AOV_N] = {{DM_AOV_TABLET}, {DM_AOV_PHONE}};',
       'static const ov_ctl OV_LAYOUTS_ALL[DM_NGAMES][2][DM_AOV_N] = {DM_AOV_ALL};\n#define OV_LAYOUTS (OV_LAYOUTS_ALL[g_dm_prof_index])')
+# saves: DM_SAVES_DIR (set by the app) puts the exported saves in a folder the player can open, instead of <files>/saves
+patch('android/saves_android.c', 'snprintf(g_dir, sizeof g_dir, "%s/saves", files_root); mkdir(g_dir, 0770);',
+      'const char *sd = getenv("DM_SAVES_DIR"); snprintf(g_dir, sizeof g_dir, "%s", sd && *sd ? sd : "");\n'
+      '    if (!g_dir[0]) snprintf(g_dir, sizeof g_dir, "%s/saves", files_root);\n'
+      '    for (char *q = g_dir + 1; *q; q++) if (*q == \'/\') { *q = 0; mkdir(g_dir, 0770); *q = \'/\'; }\n'
+      '    mkdir(g_dir, 0770);')
 # the pause menu's Quit: the Resume row is split, Resume on the left and Quit on the right (a touch on the right half ends the game)
 patch('android/overlay_layout.h', 'OVM_AUDIO, OVM_RESUME, OVM_TAB, OVM_N };', 'OVM_AUDIO, OVM_RESUME, OVM_QUIT, OVM_TAB, OVM_N };')
 patch('android/gfx_vk_present.c', '"Audio output", "Resume", ""};', '"Audio output", "Resume", "Quit", ""};')

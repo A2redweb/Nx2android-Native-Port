@@ -80,6 +80,9 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
             c.addView(ui.row(8,
                 ui.button("Play", true) { a.startActivity(Intent(a, PlayActivity::class.java).putExtra(PlayActivity.EXTRA_GAME, g.name)) }.also { it.isEnabled = ready; it.alpha = if (ready) 1f else 0.4f },
                 ui.button("Driver") { pickDriver(g.name, shown) },
+                ui.button("Saves") { saves(shown) }))
+            c.addView(ui.row(8,
+                ui.button("Copy log link") { shareLog(g, shown) },
                 ui.button("Delete") {
                     a.ask("Delete $shown from this phone? Its saves are deleted too. Port it again from your dump any time.", "Delete") {
                         Thread { g.deleteRecursively(); a.runOnUiThread { refresh() } }.start()
@@ -95,5 +98,59 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         val labels = listOf("As for all games (Port tab)", "The phone's own driver") + drivers.map { it.id }
         val cur = ids.indexOf(Drivers.ownChoice(a, game)).coerceAtLeast(0)
         ui.dialog(title = "Vulkan driver for $shown", items = labels, selected = cur, onPick = { i -> Drivers.chooseFor(a, game, ids[i]) })
+    }
+
+    /** the game's log, uploaded; the link is copied */
+    private fun shareLog(g: File, shown: String) {
+        ui.dialog(title = "Copy a link to this game's log", message = "The log of $shown (its port and its output) is uploaded to a public paste site, and the link is copied. Anyone with the link can read it. It holds no keys, only what the app printed.",
+            yes = "Upload", onYes = {
+                Thread {
+                    val r: Any = try { LogShare.upload(LogShare.gameLog(g, shown)) } catch (e: Exception) { Pair("", e.message) }
+                    a.runOnUiThread {
+                        if (r is String) {
+                            a.getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("log link", r))
+                            ui.dialog(title = "Link copied", message = r, yes = "OK", no = null)
+                        } else ui.dialog(title = "Upload failed", message = ((r as Pair<*, *>).second as? String) ?: "no network?", yes = "OK", no = null)
+                    }
+                }.start()
+            })
+    }
+
+    /** the saves in Nx2android/exported saves/<game>: import one, or pick any folder to import from */
+    private fun saves(shown: String) {
+        if (!Saves.access()) {
+            ui.dialog(title = "Saves of $shown", message = "Saves are exported to Nx2android/exported saves/$shown on your phone, where you can open them. Allow \"All files access\" for this app to use that folder (no root or Shizuku). Until then they stay in the app's own folder.",
+                yes = "Allow access", onYes = { Saves.requestAccess(a) }, no = "Close")
+            return
+        }
+        val dir = Saves.dirFor(shown)
+        val found = Saves.list(dir)
+        val fmt = java.text.SimpleDateFormat("d MMM yyyy HH:mm", java.util.Locale.getDefault())
+        ui.dialog(title = "Saves of $shown",
+            message = (if (found.isEmpty()) "No saves in ${dir.path} yet. Export one from the game's pause menu, or pick a save folder." else "Pick a save to import, or choose another folder. ${dir.path}"),
+            items = found.map { "${it.name}${if (it.device) " (+device)" else ""} · ${fmt.format(java.util.Date(it.time))} · ${it.files} files, ${Catalog.human(it.bytes)}" },
+            onPick = { i -> confirmImport(dir, found[i].name) },
+            yes = "Select folder…", onYes = { pickSaveFolder(dir) }, no = "Close")
+    }
+
+    private fun confirmImport(dir: File, name: String) {
+        a.ask("Import $name? The game's current save is backed up first. It is applied the next time you start the game.", "Import") {
+            try { Saves.requestImport(dir, name) ; ui.dialog(message = "Done: $name will be imported when you start the game.", yes = "OK", no = null) }
+            catch (e: Exception) { ui.dialog(message = "Could not set up the import: ${e.message}", yes = "OK", no = null) }
+        }
+    }
+
+    private fun pickSaveFolder(dir: File) {
+        a.pickTree { uri ->
+            Thread {
+                val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+                val dst = File(dir, "$stamp-picked")
+                val n = try { Saves.copyTree(a.contentResolver, uri, android.provider.DocumentsContract.getTreeDocumentId(uri), dst) } catch (e: Exception) { dst.deleteRecursively(); -1 }
+                a.runOnUiThread {
+                    if (n <= 0) { dst.deleteRecursively(); ui.dialog(message = "That folder has no files (or could not be read).", yes = "OK", no = null) }
+                    else confirmImport(dir, dst.name)
+                }
+            }.start()
+        }
     }
 }
