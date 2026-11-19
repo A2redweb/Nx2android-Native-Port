@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Fetch upstream
         run: |
-          mkdir -p /tmp/up && curl -fsSL "https://codeload.github.com/shirai91/nx2android/tar.gz/${{ inputs.upstream || 'main' }}" | tar -xz -C /tmp/up --strip-components=1
+          mkdir -p /tmp/up && curl -fsSL "https://codeload.github.com/shirai91/nx2android/tar.gz/${{ inputs.upstream || 'eafa740825d6fdb1c56112c3875ded8e04566cea' }}" | tar -xz -C /tmp/up --strip-components=1
       - name: Install NDK
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" >/dev/null
