@@ -14,6 +14,19 @@ object LogShare {
         sb.append("nx2android native · build ").append(BuildConfig.COMMIT).append('\n')
         sb.append("game: ").append(shown).append(" (").append(dir.name).append(")\n")
         sb.append("device: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append(", Android ").append(Build.VERSION.RELEASE).append('\n')
+        sb.append("SoC: ").append(if (Build.VERSION.SDK_INT >= 31) "${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}" else Build.HARDWARE).append(", board ").append(Build.BOARD).append(", ").append(Build.FINGERPRINT).append('\n')
+        for (f in listOf("env.txt", "env_user.txt")) File(dir, f).takeIf { it.isFile }?.let { sb.append("\n== ").append(f).append(" ==\n").append(it.readText().trim()).append('\n') }
+        // the lines that say what the graphics ran on and what the host complained about, from the whole log (its start, which the tail below can cut, holds the GPU and driver)
+        File(dir, "log.txt").takeIf { it.isFile }?.let { f ->
+            val key = Regex("GPU |DM_VK_DRIVER|Vulkan [0-9]|driver|\\[RED\\]|not in the bundle|skipped \\(no|features|custom driver|memory pools in the last|longframe")
+            val seen = LinkedHashSet<String>()
+            val out = StringBuilder()
+            for (l in f.readLines()) if (key.containsMatchIn(l)) {
+                val k = l.replace(Regex("[0-9a-f]{16}"), "#").replace(Regex("[0-9.]+"), "0")
+                if (seen.size < 300 && seen.add(k)) out.append(l.take(300)).append('\n')
+            }
+            sb.append("\n== key lines of the game's log (the GPU and driver, every red line, skipped draws; repeats left out) ==\n").append(out.toString().ifBlank { "(none: the game has not run since the app was installed)\n" })
+        }
         for (f in listOf("rewrite.txt", "shaders.txt")) File(dir, f).takeIf { it.isFile }?.let { sb.append("\n== ").append(f).append(" ==\n").append(it.readText().trim()).append('\n') }
         File(dir, "port.log").takeIf { it.isFile }?.let { sb.append("\n== port log ==\n").append(it.readText().trim()).append('\n') }
         val fmt = java.text.SimpleDateFormat("d MMM HH:mm:ss", java.util.Locale.US)
