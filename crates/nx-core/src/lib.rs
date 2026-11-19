@@ -165,7 +165,9 @@ pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<Stri
         std::fs::write(img_dir.join("main"), img).map_err(|e| e.to_string())?;
     }
     let roots = [(img_dir, "".to_string()), (game_dir.join("RomFS"), "RomFS".to_string())];
-    let (index, skipped) = nx_shader::scan::scan_dir(&roots, common, std::sync::Arc::new(nx_shader::container::zs_dicts(&game_dir.join("RomFS"))?), &work.join("spool.bin"), threads, &|d, t| progress("scanning", d, t))?;
+    let (mut index, skipped) = nx_shader::scan::scan_dir(&roots, common, std::sync::Arc::new(nx_shader::container::zs_dicts(&game_dir.join("RomFS"))?), &work.join("spool.bin"), threads, &|d, t| progress("scanning", d, t))?;
+    // shaders the game set while it ran, whose code no game file holds: saved by an earlier play (captured_shaders/), translated in now
+    let (captured, cap_notes) = index.add_captures(&game_dir.join("captured_shaders"))?;
     let params = nx_shader::pipeline::Params {
         xlate,
         work: work.join("xlate"),
@@ -186,7 +188,9 @@ pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<Stri
         let why: Vec<String> = te.iter().take(4).map(|(l, n)| format!("{n}x {l}")).collect();
         return Err(format!("{} of {} shaders failed; {}{}", rep.failed.len(), rep.expected.len(), first.join("; "), if why.is_empty() { String::new() } else { format!("; the translator said: {}", why.join(" | ")) }));
     }
-    Ok(format!("{} shaders ({} unreadable files)", rep.emitted, skipped.len()))
+    let cap = if captured > 0 { format!(", {captured} captured while playing") } else { String::new() };
+    let bad = if cap_notes.is_empty() { String::new() } else { format!("; [RED] {}", cap_notes.iter().take(3).cloned().collect::<Vec<_>>().join("; ")) };
+    Ok(format!("{} shaders ({} unreadable files{cap}){bad}", rep.emitted, skipped.len()))
 }
 
 /// The games list as JSON (`{"games":[...]}`) or `{"error":"..."}`. `overlay` is the text of upstream's `overlay_default.tsv`, when the controls should be validated.

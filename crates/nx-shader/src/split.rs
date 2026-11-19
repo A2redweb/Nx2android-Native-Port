@@ -113,7 +113,7 @@ pub fn check(st: Stage, ctl: &[u8], code: &[u8]) -> Option<&'static str> {
 }
 
 /// A GLSLC output's stage, from its code area's header (graphics: the SPH's stage bits), or compute when the code has no header and the control's thread group (+0x748) is filled
-fn glslc_stage(ctl: &[u8], code: &[u8]) -> Option<Stage> {
+pub fn glslc_stage(ctl: &[u8], code: &[u8]) -> Option<Stage> {
     let m = code.get(..4);
     let headerless_cs = m != Some(&CS_MAGIC[..]) && m != Some(&GFX_MAGIC[..]) && ctl.len() >= 0x754 && (0..3).all(|i| u32le(ctl, 0x748 + 4 * i).is_ok_and(|v| v != 0));
     if m == Some(&CS_MAGIC[..]) || headerless_cs {

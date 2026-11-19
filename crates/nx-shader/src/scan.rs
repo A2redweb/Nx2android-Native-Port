@@ -25,6 +25,35 @@ pub struct Index {
 }
 
 impl Index {
+    /// Adds the shaders the game captured while it ran (`<dir>/<key>.bin`: "DMSC", u32 control length, u32 code length, control, code; gfx_vk_shader.c vk_shader_missing) that the index
+    /// does not hold. Returns how many were added and a line for each file that was left out and why.
+    pub fn add_captures(&mut self, dir: &Path) -> Result<(usize, Vec<String>), String> {
+        use crate::split::{check, glslc_stage, skey};
+        let mut names: Vec<_> = match std::fs::read_dir(dir) { Ok(r) => r.filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect(), Err(_) => return Ok((0, vec![])) };
+        names.sort();
+        let (mut added, mut notes) = (0, vec![]);
+        let mut w = std::fs::OpenOptions::new().append(true).open(&self.spool).map_err(|e| e.to_string())?;
+        let mut pos = w.metadata().map_err(|e| e.to_string())?.len();
+        for nm in names {
+            let stem = match nm.strip_suffix(".bin") { Some(s) if s.len() == 16 && s.bytes().all(|b| b.is_ascii_hexdigit()) => s.to_ascii_lowercase(), _ => continue };
+            let Ok(want) = u64::from_str_radix(&stem, 16) else { continue };
+            let b = std::fs::read(dir.join(&nm)).map_err(|e| format!("{nm}: {e}"))?;
+            if b.len() < 12 || &b[..4] != b"DMSC" { notes.push(format!("capture {nm}: not a captured shader")); continue; }
+            let (nctl, ncode) = (u32::from_le_bytes(b[4..8].try_into().unwrap()) as usize, u32::from_le_bytes(b[8..12].try_into().unwrap()) as usize);
+            if b.len() != 12 + nctl + ncode { notes.push(format!("capture {nm}: truncated")); continue; }
+            let (ctl, code) = (&b[12..12 + nctl], &b[12 + nctl..]);
+            if skey(ctl, code) != want { notes.push(format!("capture {nm}: its content does not hash to its name")); continue; }
+            if self.ents.contains_key(&want) { continue; }
+            let Some(st) = glslc_stage(ctl, code) else { notes.push(format!("capture {nm}: cannot determine its shader stage")); continue };
+            if let Some(why) = check(st, ctl, code) { notes.push(format!("capture {nm}: {why}")); continue; }
+            w.write_all(ctl).and_then(|_| w.write_all(code)).map_err(|e| e.to_string())?;
+            self.ents.insert(want, Ent { stage: st, label: format!("captured/{nm}"), off: pos, ctl_len: nctl as u32, code_len: ncode as u32 });
+            pos += (nctl + ncode) as u64;
+            added += 1;
+        }
+        Ok((added, notes))
+    }
+
     pub fn load(&self, key: u64) -> Result<(Vec<u8>, Vec<u8>), String> {
         let e = self.ents.get(&key).ok_or_else(|| format!("no shader {key:016x}"))?;
         let mut f = File::open(&self.spool).map_err(|x| x.to_string())?;

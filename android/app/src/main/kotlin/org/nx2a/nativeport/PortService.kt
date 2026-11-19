@@ -31,6 +31,7 @@ class PortService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        intent?.getStringExtra("shadersOf")?.let { return rebuildShaders(it, intent.getIntExtra("jobs", 3), startId) }
         val base = intent?.getStringExtra("base") ?: return stop(startId)
         if (Ports.running) {
             Ports.say("A port is already running.")
@@ -112,6 +113,45 @@ class PortService : Service() {
                 if (wake.isHeld) wake.release()
                 Ports.running = false
                 getSystemService(NotificationManager::class.java).notify(1, notification(if (ok) "$stem: done" else "$stem: stopped"))
+                stopForeground(STOP_FOREGROUND_DETACH)
+                stopSelf(startId)
+            }
+        }.start()
+        return START_NOT_STICKY
+    }
+
+    /** Only the shader step, for a game already ported: translates in what the game captured while it ran (captured_shaders/). */
+    private fun rebuildShaders(id: String, jobs: Int, startId: Int): Int {
+        if (Ports.running) { Ports.say("A port is already running."); return stop(startId) }
+        createChannel()
+        startForeground(1, notification("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        val dst = File(filesDir, "data/$id")
+        val shown = File(dst, "name.txt").takeIf { it.exists() }?.readText()?.trim()?.ifEmpty { null } ?: id
+        Ports.begin(shown)
+        val wake = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "nx2a:shaders").apply { setReferenceCounted(false); acquire(2 * 60 * 60 * 1000L) }
+        Thread {
+            var ok = false
+            try {
+                Ports.say("Shaders of $shown: the game's own and the ones it captured while you played (${File(dst, "captured_shaders").list()?.size ?: 0} files)")
+                val xlate = File(applicationInfo.nativeLibraryDir, "libdmsh_xlate.so")
+                if (!xlate.isFile) throw Failure("the shader translator is not part of this build")
+                step(1, 1, "Build the shaders", notify = shown) {
+                    val old = File(dst, "shaders.dmsv"); val bak = File(dst, "shaders.dmsv.old")
+                    if (old.exists()) old.renameTo(bak)
+                    val sh = Core.nativeBuildShaders(File(filesDir, "games").path, id, dst.path, xlate.path, translatorThreads(jobs))
+                    if (sh.startsWith("error")) { File(dst, "shaders.dmsv").delete(); bak.renameTo(old) } else bak.delete()   // a failed build keeps the bundle that worked
+                    File(dst, "shaders.txt").writeText(sh + "\n")
+                    sh
+                }
+                Ports.stage = "finished"
+                Ports.say("Done. Start the game again to use them; play further and run this again to add more.")
+                ok = true
+            } catch (e: Failure) { fail(e.message ?: "failed") }
+            catch (e: Exception) { android.util.Log.e("nx2a", "shader build failed", e); fail("${e.javaClass.simpleName}: ${e.message}") }
+            finally {
+                if (wake.isHeld) wake.release()
+                Ports.running = false
+                getSystemService(NotificationManager::class.java).notify(1, notification(if (ok) "$shown: shaders done" else "$shown: stopped"))
                 stopForeground(STOP_FOREGROUND_DETACH)
                 stopSelf(startId)
             }
@@ -288,6 +328,10 @@ class PortService : Service() {
             .build()
 
     companion object {
+        fun shaders(ctx: Context, game: String, jobs: Int = 3) {
+            ctx.startForegroundService(Intent(ctx, PortService::class.java).putExtra("shadersOf", game).putExtra("jobs", jobs))
+        }
+
         fun start(ctx: Context, base: Uri, baseName: String, update: Uri?, updateName: String, dlc: List<Pair<Uri, String>>, opt: PortOptions) {
             val i = Intent(ctx, PortService::class.java)
                 .putStringArrayListExtra("dlc", ArrayList(dlc.map { it.first.toString() }))

@@ -83,6 +83,7 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
                 ui.button("Saves") { saves(shown) }))
             c.addView(ui.row(8,
                 ui.button("Copy log link") { shareLog(g, shown) },
+                ui.button("Update shaders") { updateShaders(g, shown) },
                 ui.button("Delete") {
                     a.ask("Delete $shown from this phone? Its saves are deleted too. Port it again from your dump any time.", "Delete") {
                         Thread { g.deleteRecursively(); a.runOnUiThread { refresh() } }.start()
@@ -98,6 +99,15 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         val labels = listOf("As for all games (Port tab)", "The phone's own driver") + drivers.map { it.id }
         val cur = ids.indexOf(Drivers.ownChoice(a, game)).coerceAtLeast(0)
         ui.dialog(title = "Vulkan driver for $shown", items = labels, selected = cur, onPick = { i -> Drivers.chooseFor(a, game, ids[i]) })
+    }
+
+    /** some of a game's shaders are in no game file: the game saves them the first time it needs them, and this translates them in */
+    private fun updateShaders(g: File, shown: String) {
+        val n = File(g, "captured_shaders").list()?.size ?: 0
+        a.ask("Play $shown first; the game saves shaders it was missing as it meets them ($n saved so far). This translates them in, so the next start draws what was left out. It takes a few minutes; progress is in the Log tab.", "Update") {
+            PortService.shaders(a, g.name)
+            a.showTab("log")
+        }
     }
 
     /** the game's log, uploaded; the link is copied */
