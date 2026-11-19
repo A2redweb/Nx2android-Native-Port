@@ -43,6 +43,12 @@ cargo run -p nxn -- aoc prod.keys dlc.nsp out/aoc
 cargo run -p nxn -- verify prod.keys game.nsp        # hash trees: finds damaged files
 ```
 
+## Saves and logs
+
+- Export save (pause menu) writes to `Nx2android/exported saves/<game name>/` on the phone's storage. That needs Android's "All files access" for the app (Games tab > Saves > Allow access); no root or Shizuku. Without it, exports stay in the app's own folder.
+- Games tab > Saves lists the saves in that folder to import, or imports from any folder you pick. An import is applied the next time the game starts, after the current save is backed up.
+- Games tab > Copy log link uploads that game's log (port log and the game's output) to a public paste site and copies the link.
+
 ## Docs
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md): the plan
