@@ -4,12 +4,14 @@
 // a virtual machine that follows Atmosphère's cheat VM (opcodes 0-A, C0, C1; what is not implemented makes its cheat stop with a line in the log, never a crash).
 // The pause menu's Cheats tab (android/overlay_layout.h, front_android.c) toggles them and rewrites cheats_on.txt.
 #include "hle.h"
+#include <errno.h>
 #include <mach/mach.h>
+#include <sys/mman.h>
 
 #define MAXC 512
 #define MAXW 4096
 typedef struct { char name[72]; int master, on, bad; uint32_t *w; int nw; } cheat_t;
-static cheat_t g_c[MAXC]; static int g_n, g_page, g_loaded, g_rev;
+static cheat_t g_c[MAXC]; static int g_n, g_off, g_loaded, g_rev;
 uint8_t *dm_guest_heap_base(void);
 
 static int crd(uint64_t a, void *out, size_t n) { vm_size_t got = 0; return a >= 0x1000 && vm_read_overwrite(mach_task_self(), (vm_address_t)a, n, (vm_address_t)out, &got) == KERN_SUCCESS && got == n; }
@@ -65,9 +67,22 @@ typedef struct { uint64_t r[16], sv[16]; uint8_t *main, *heap; cheat_t *c; int p
 static uint64_t base_of(vm_t *v, int m) { return m == 0 ? (uint64_t)(uintptr_t)v->main : m == 1 ? (uint64_t)(uintptr_t)v->heap : 0; }
 static int wmask(int t, uint64_t *m) { if (t == 1) *m = 0xff; else if (t == 2) *m = 0xffff; else if (t == 4) *m = 0xffffffffull; else if (t == 8) *m = ~0ull; else return 0; return 1; }
 static int mread(uint64_t a, int t, uint64_t *out) { *out = 0; return (t == 1 || t == 2 || t == 4 || t == 8) && crd(a, out, (size_t)t); }
+// the page protection of an address (from /proc/self/maps), -1 if it is not mapped
+static int prot_of(uintptr_t a) {
+    FILE *f = fopen("/proc/self/maps", "r"); if (!f) return -1; char ln[256]; int r = -1;
+    while (fgets(ln, sizeof ln, f)) { unsigned long lo, hi; char pm[8]; if (sscanf(ln, "%lx-%lx %7s", &lo, &hi, pm) == 3 && a >= lo && a < hi) { r = (pm[0] == 'r' ? PROT_READ : 0) | (pm[1] == 'w' ? PROT_WRITE : 0) | (pm[2] == 'x' ? PROT_EXEC : 0); break; } }
+    fclose(f); return r;
+}
+// a value written to guest memory; the game's code is mapped read-only (the cheats that patch it, the Exp boosters), so its page is opened for the write and closed again
 static void mwrite(uint64_t a, int t, uint64_t v) {
     uint64_t cur; if (!mread(a, t, &cur)) return; if (cur == v) return;
-    uint8_t *p = (uint8_t *)(uintptr_t)a; dm_guest_write_prepare(p, (size_t)t); memcpy(p, &v, (size_t)t);
+    uint8_t *p = (uint8_t *)(uintptr_t)a; int prot = prot_of((uintptr_t)a), prot_end = prot_of((uintptr_t)a + (size_t)t - 1);
+    if (prot < 0 || prot != prot_end) return;
+    if (prot & PROT_WRITE) { dm_guest_write_prepare(p, (size_t)t); memcpy(p, &v, (size_t)t); return; }
+    uintptr_t pg = (uintptr_t)a & ~(uintptr_t)4095, len = (((uintptr_t)a + (size_t)t - 1) & ~(uintptr_t)4095) + 4096 - pg;
+    if (mprotect((void *)pg, len, prot | PROT_WRITE)) { static int once; if (!once++) LOG("cheats: cannot write the read-only page at %#llx (%s)", (unsigned long long)a, strerror(errno)); return; }
+    memcpy(p, &v, (size_t)t); mprotect((void *)pg, len, prot);
+    if (prot & PROT_EXEC) __builtin___clear_cache((char *)p, (char *)p + t);
 }
 static int cmp(int c, uint64_t a, uint64_t b) { switch (c) { case 1: return a > b; case 2: return a >= b; case 3: return a < b; case 4: return a <= b; case 5: return a == b; case 6: return a != b; } return 0; }
 // the index after the end of the block that starts at pc (a conditional's block ends at its End or its Else, nesting counted); -1 if there is none
@@ -167,19 +182,17 @@ void dm_cheat_tick(void) {
     uint8_t *heap = dm_guest_heap_base();
     for (int i = 0; i < g_n; i++) if (g_c[i].on && !g_c[i].bad) run(&g_c[i], main_base, heap);
 }
-// the pause menu: slots 0..3 of the open page
+// the pause menu: five rows showing the list from g_off; a finger drags it, a controller steps past its ends
 int dm_cheat_count(void) { if (!g_loaded) load(); int n = 0; for (int i = 0; i < g_n; i++) n += !g_c[i].master; return n; }
-static cheat_t *slot(int k) { int n = 0, want = g_page * 4 + k; for (int i = 0; i < g_n; i++) if (!g_c[i].master) { if (n++ == want) return &g_c[i]; } return NULL; }
+static cheat_t *slot(int k) { int n = 0, want = g_off + k; for (int i = 0; i < g_n; i++) if (!g_c[i].master) { if (n++ == want) return &g_c[i]; } return NULL; }
 int dm_cheat_slot_valid(int k) { if (!g_loaded) load(); if (!dm_cheat_count()) return k == 0; return slot(k) != NULL; }
-int dm_cheat_pages(void) { return (dm_cheat_count() + 3) / 4; }
-void dm_cheat_page_next(void) { int p = dm_cheat_pages(); g_page = p ? (g_page + 1) % p : 0; g_rev++; }
+int dm_cheat_scroll(int d) { int n = dm_cheat_count(), o = g_off + d; if (o > n - 5) o = n - 5; if (o < 0) o = 0; if (o == g_off) return 0; g_off = o; g_rev++; return 1; }
+int dm_cheat_offset(void) { return g_off; }
 int dm_cheat_rev(void) { return g_rev; }   // the menu's state changes with it, so the panel is drawn again
 void dm_cheat_toggle(int k) { cheat_t *c = slot(k); if (!c) return; c->on = !c->on; g_rev++; if (c->on) c->bad = 0; on_save(); LOG("cheats: \"%s\" %s", c->name, c->on ? "on" : "off"); }
-unsigned dm_cheat_bits(void) { unsigned b = 0; for (int k = 0; k < 4; k++) { cheat_t *c = slot(k); if (c && c->on) b |= 1u << k; } return b; }
-// the label a menu row shows: a cheat's name, the page row's counter, or the row's own label
+unsigned dm_cheat_bits(void) { unsigned b = 0; for (int k = 0; k < 5; k++) { cheat_t *c = slot(k); if (c && c->on) b |= 1u << k; } return b; }
 const char *dm_cheat_label(int k, const char *fallback) {
-    static char buf[96];
-    if (k >= 0 && k < 4) { cheat_t *c = slot(k); if (c) { snprintf(buf, sizeof buf, "%s", c->name); return buf; } return dm_cheat_count() ? "" : "No cheats: add them in the app"; }
-    if (k == 4) { snprintf(buf, sizeof buf, "Cheats %d of %d", g_page + 1, dm_cheat_pages()); return buf; }
-    return fallback;
+    static char buf[96]; (void)fallback;
+    cheat_t *c = slot(k); if (c) { snprintf(buf, sizeof buf, "%s", c->name); return buf; }
+    return dm_cheat_count() ? "" : "No cheats: add them in the app";
 }

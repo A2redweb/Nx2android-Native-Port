@@ -105,7 +105,7 @@ patch('android/saves_android.c', 'snprintf(g_dir, sizeof g_dir, "%s/saves", file
       '    for (char *q = g_dir + 1; *q; q++) if (*q == \'/\') { *q = 0; mkdir(g_dir, 0770); *q = \'/\'; }\n'
       '    mkdir(g_dir, 0770);')
 # the pause menu's Quit: the Resume row is split, Resume on the left and Quit on the right (a touch on the right half ends the game)
-patch('android/overlay_layout.h', 'OVM_AUDIO, OVM_RESUME, OVM_TAB, OVM_N };', 'OVM_AUDIO, OVM_CHEAT0, OVM_CHEAT1, OVM_CHEAT2, OVM_CHEAT3, OVM_CHPAGE, OVM_RESUME, OVM_QUIT, OVM_TAB, OVM_N };')
+patch('android/overlay_layout.h', 'OVM_AUDIO, OVM_RESUME, OVM_TAB, OVM_N };', 'OVM_AUDIO, OVM_CHEAT0, OVM_CHEAT1, OVM_CHEAT2, OVM_CHEAT3, OVM_CHEAT4, OVM_RESUME, OVM_QUIT, OVM_TAB, OVM_N };')
 patch('android/gfx_vk_present.c', '"Audio output", "Resume", ""};', '"Audio output", "", "", "", "", "", "Resume", "Quit", ""};')
 patch('android/gfx_vk_present.c', 'cv_text(cv, r[0] + (rw - cv_text_w("Resume", is)) / 2, cy, "Resume", is, C_ACCENT); continue; }',
       'cv_text(cv, r[0] + (rw / 2 - cv_text_w("Resume", is)) / 2, cy, "Resume", is, C_ACCENT); '
@@ -135,29 +135,47 @@ patch('android/build.py', "subprocess.run([sys.executable, str(DM / 'games/game.
       "import shutil as _sh; _sh.copy(os.environ['UW_GEN'] + '/game_profile.h', gen / a.game / 'game_profile.h')")
 patch('android/build.py', "subprocess.run([sys.executable, str(DM / 'android/tools/android_profile.py'), 'header', a.game, str(gen / a.game / 'android_profile.h')], check=True)",
       "_sh.copy(os.environ['UW_GEN'] + '/android_profile.h', gen / a.game / 'android_profile.h')")
-# cheats (tools/dm_cheats.c): the virtual machine, its tick on every present, a third tab in the pause menu (Cheats: four rows and a page switch)
+# cheats (tools/dm_cheats.c): the virtual machine, its tick on every present, a third tab in the pause menu (Cheats: five rows that scroll)
 import shutil as _shutil
 _shutil.copy(Path(__file__).resolve().parent / 'dm_cheats.c', dm / 'host' / 'dm_cheats.c')
 patch('host/hle_svc.c', 'static uint8_t *g_heap; static size_t g_heap_cur, g_heap_cap;', 'static uint8_t *g_heap; static size_t g_heap_cur, g_heap_cap;\nuint8_t *dm_guest_heap_base(void) { return g_heap; }')
 patch('gfx/nvn/hle_nvn.c', '__attribute__((weak)) void dm_fps_lock_tick(void) {}', '__attribute__((weak)) void dm_cheat_tick(void) {}\n__attribute__((weak)) void dm_fps_lock_tick(void) {}')
 patch('gfx/nvn/hle_nvn.c', '    dm_fps_lock_tick();\n', '    dm_fps_lock_tick(); dm_cheat_tick();\n')
 patch('android/overlay_layout.h', '#define OVM_TABS 2\n', '#define OVM_TABS 3\n')
-patch('android/overlay_layout.h', '{OVM_FPS, OVM_MODE, OVM_EXPORT, OVM_IMPORT, OVM_AUDIO}};', '{OVM_FPS, OVM_MODE, OVM_EXPORT, OVM_IMPORT, OVM_AUDIO}, {OVM_CHEAT0, OVM_CHEAT1, OVM_CHEAT2, OVM_CHEAT3, OVM_CHPAGE}};')
+patch('android/overlay_layout.h', '{OVM_FPS, OVM_MODE, OVM_EXPORT, OVM_IMPORT, OVM_AUDIO}};', '{OVM_FPS, OVM_MODE, OVM_EXPORT, OVM_IMPORT, OVM_AUDIO}, {OVM_CHEAT0, OVM_CHEAT1, OVM_CHEAT2, OVM_CHEAT3, OVM_CHEAT4}};')
 patch('android/overlay_layout.h', '{"Gamepad", "Game"};', '{"Gamepad", "Game", "Cheats"};')
-patch('android/overlay_layout.h', 'int dm_menu_audio_available(void);\n', 'int dm_menu_audio_available(void);\nint dm_cheat_slot_valid(int k), dm_cheat_count(void), dm_cheat_pages(void), dm_cheat_rev(void); unsigned dm_cheat_bits(void); void dm_cheat_toggle(int k), dm_cheat_page_next(void);\nconst char *dm_cheat_label(int k, const char *fallback);\n')
+patch('android/overlay_layout.h', 'int dm_menu_audio_available(void);\n', 'int dm_menu_audio_available(void);\nint dm_cheat_slot_valid(int k), dm_cheat_count(void), dm_cheat_scroll(int d), dm_cheat_offset(void), dm_cheat_rev(void); unsigned dm_cheat_bits(void); void dm_cheat_toggle(int k);\nconst char *dm_cheat_label(int k, const char *fallback);\n')
 patch('android/overlay_layout.h', 'OVM_TAB_ITEMS[tab & 1][row - 1]', 'OVM_TAB_ITEMS[tab % OVM_TABS][row - 1]')
 patch('android/overlay_layout.h', '    return item == OVM_AUDIO && !dm_menu_audio_available() ? -1 : item;',
-      '    if (item >= OVM_CHEAT0 && item <= OVM_CHEAT3 && !dm_cheat_slot_valid(item - OVM_CHEAT0)) return -1;\n    if (item == OVM_CHPAGE && dm_cheat_pages() < 2) return -1;\n    return item == OVM_AUDIO && !dm_menu_audio_available() ? -1 : item;')
-patch('android/gfx_vk_present.c', '[OVM_AUDIO] = "Select"};', '[OVM_AUDIO] = "Select", [OVM_CHPAGE] = "Next"};')
+      '    if (item >= OVM_CHEAT0 && item <= OVM_CHEAT4 && !dm_cheat_slot_valid(item - OVM_CHEAT0)) return -1;\n    return item == OVM_AUDIO && !dm_menu_audio_available() ? -1 : item;')
+patch('android/gfx_vk_present.c', '[OVM_AUDIO] = "Select"};', '[OVM_AUDIO] = "Select"};')
 patch('android/gfx_vk_present.c', 'int tab = st >> 8 & 1, sel', 'int tab = (st >> 8 & 1) | (st >> 29 & 1) << 1, sel')
 patch('android/gfx_vk_present.c', '    cv_text(cv, r[0] + rh * 0.15f, cy, OVM_LABELS[it], is, row == sel ? C_WHITE : C_DIM);\n',
       '    {   // a cheat row shows the cheat\'s name (shrunk, then cut, to fit before its switch)\n'
-      '        char lb[96]; snprintf(lb, sizeof lb, "%s", it >= OVM_CHEAT0 && it <= OVM_CHPAGE ? dm_cheat_label(it - OVM_CHEAT0, "") : OVM_LABELS[it]);\n'
+      '        char lb[96]; snprintf(lb, sizeof lb, "%s", it >= OVM_CHEAT0 && it <= OVM_CHEAT4 ? dm_cheat_label(it - OVM_CHEAT0, "") : OVM_LABELS[it]);\n'
       '        int ls = is; float room = rw * 0.62f; while (ls > 1 && cv_text_w(lb, ls) > room) ls--;\n'
       '        for (size_t n = strlen(lb); n > 3 && cv_text_w(lb, ls) > room; ) lb[--n] = 0;\n'
       '        cv_text(cv, r[0] + rh * 0.15f, cy, lb, ls, row == sel ? C_WHITE : C_DIM);\n'
       '        if (it == OVM_CHEAT0 && !dm_cheat_count()) continue;\n    }\n')
-patch('android/gfx_vk_present.c', 'int on = st >> (it == OVM_OVERLAY ? 0 : it == OVM_RUMBLE ? 1 : 3) & 1;', 'int on = it >= OVM_CHEAT0 && it <= OVM_CHEAT3 ? (int)(dm_cheat_bits() >> (it - OVM_CHEAT0) & 1) : st >> (it == OVM_OVERLAY ? 0 : it == OVM_RUMBLE ? 1 : 3) & 1;')
+patch('android/gfx_vk_present.c', 'int on = st >> (it == OVM_OVERLAY ? 0 : it == OVM_RUMBLE ? 1 : 3) & 1;', 'int on = it >= OVM_CHEAT0 && it <= OVM_CHEAT4 ? (int)(dm_cheat_bits() >> (it - OVM_CHEAT0) & 1) : st >> (it == OVM_OVERLAY ? 0 : it == OVM_RUMBLE ? 1 : 3) & 1;')
 patch('android/front_android.c', 'atomic_load(&g_menu_tab) << 8 | atomic_load(&g_set_opacity) << 9', '(atomic_load(&g_menu_tab) & 1) << 8 | (atomic_load(&g_menu_tab) >> 1) << 29 | (dm_cheat_rev() & 1) << 30 | atomic_load(&g_set_opacity) << 9')
-patch('android/front_android.c', '    else if (item == OVM_AUDIO) { menu_audio(); }\n', '    else if (item == OVM_AUDIO) { menu_audio(); }\n    else if (item >= OVM_CHEAT0 && item <= OVM_CHEAT3) { if (!dm_cheat_count()) return; dm_cheat_toggle(item - OVM_CHEAT0); }\n    else if (item == OVM_CHPAGE) dm_cheat_page_next();\n')
+patch('android/front_android.c', '    else if (item == OVM_AUDIO) { menu_audio(); }\n', '    else if (item == OVM_AUDIO) { menu_audio(); }\n    else if (item >= OVM_CHEAT0 && item <= OVM_CHEAT4) { if (!dm_cheat_count() || g_dragged) return; dm_cheat_toggle(item - OVM_CHEAT0); }\n')
+patch('android/front_android.c', 'static void menu_do(int item) {\n', 'static float g_drag_y; static int g_dragged;   // a finger dragging the cheat list: the touch that scrolled does not toggle the row it ends on\nstatic void menu_do(int item) {\n')
+patch('android/front_android.c', '        g_menu_ptr = id; g_menu_row = row;\n', '        g_menu_ptr = id; g_menu_row = row; g_drag_y = y; g_dragged = 0;\n')
+patch('android/front_android.c', '            float kx = AMotionEvent_getX(e, k), ky = AMotionEvent_getY(e, k);\n',
+      '            float kx = AMotionEvent_getX(e, k), ky = AMotionEvent_getY(e, k);\n'
+      '            if (tab == 2 && dm_cheat_count() > 5) {   // the Cheats tab scrolls with the finger, a row at a time\n'
+      '                float r0[4]; ov_menu_rowrect(p, 1, r0); float step = r0[3] * 0.9f; int n = (int)((ky - g_drag_y) / step);\n'
+      '                if (n) { dm_cheat_scroll(-n); g_drag_y += (float)n * step; g_dragged = 1; atomic_store(&g_menu_hi, -1); dm_overlay_redraw(); }\n'
+      '                if (g_dragged) continue;\n            }\n')
+patch('android/front_android.c', '    int hi = atomic_load(&g_menu_hi), tab = atomic_load(&g_menu_tab), item = hi >= 0 ? ov_menu_item(tab, hi) : -1;\n    if (bit == DM_BTN_UP || bit == DM_BTN_DOWN) {\n',
+      '    int hi = atomic_load(&g_menu_hi), tab = atomic_load(&g_menu_tab), item = hi >= 0 ? ov_menu_item(tab, hi) : -1;\n    if (tab == 2 && hi >= 1 && ((bit == DM_BTN_DOWN && hi == 5 && dm_cheat_scroll(1)) || (bit == DM_BTN_UP && hi == 1 && dm_cheat_scroll(-1)))) { dm_overlay_redraw(); return; }   // the list moves past its ends\n'
+      '    if (bit == DM_BTN_UP || bit == DM_BTN_DOWN) {\n')
+patch('android/gfx_vk_present.c', '    cv_rrect(cv, 0, 0, p[2], p[3], rh * 0.18f, C_BG);\n    for (int row = 0; row < OVM_ROWS; row++) {\n        int it = ov_menu_item(tab, row);',
+      '    cv_rrect(cv, 0, 0, p[2], p[3], rh * 0.18f, C_BG);\n'
+      '    if (tab == 2 && dm_cheat_count() > 5) {   // the cheat list is longer than its rows: a thin bar at the right shows where it is\n'
+      '        float a[4], b[4]; ov_menu_rowrect(p, 1, a); ov_menu_rowrect(p, 5, b); int N = dm_cheat_count();\n'
+      '        float x = a[0] + a[2] + rh * 0.02f, w = fmaxf(2, rh * 0.05f), top = a[1] + rh * 0.1f, bot = b[1] + b[3] - rh * 0.1f, h = fmaxf(rh * 0.3f, (bot - top) * 5 / N);\n'
+      '        float y = top + (bot - top - h) * (float)dm_cheat_offset() / (float)(N - 5);\n'
+      '        cv_rrect(cv, x, top, x + w, bot, w / 2, C_OFF); cv_rrect(cv, x, y, x + w, y + h, w / 2, C_DIM);\n    }\n    for (int row = 0; row < OVM_ROWS; row++) {\n        int it = ov_menu_item(tab, row);')
 print(f'{len(games)} profiles, {len(names)} scalar fields, modules ≤{modmax}, display versions ≤{vermax}, {aov[0][0]} gamepad controls')
