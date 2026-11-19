@@ -49,6 +49,10 @@ cargo run -p nxn -- verify prod.keys game.nsp        # hash trees: finds damaged
 - Games tab > Saves lists the saves in that folder to import, or imports from any folder you pick. An import is applied the next time the game starts, after the current save is backed up.
 - Games tab > Copy log link uploads that game's log (port log and the game's output) to a public paste site and copies the link.
 
+## Cheats
+
+Tap a game's icon in Games, then "Get cheats": the community's cheats for your exact build of the game (HamletDuFromage/switch-cheats-db) are downloaded and listed with an on/off switch each. The game's host runs the switched-on ones with a virtual machine that follows Atmosphère's cheat VM (`tools/dm_cheats.c`; opcodes 0-A, C0 and C1 work; key-press conditions, C2/C3 and other regions than main and heap do not, and a cheat that uses one stops with a line in the game's log). The pause menu has a Cheats tab with the same switches. Cheat addresses belong to one build of a game: a cheat for another version is not offered.
+
 ## Docs
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md): the plan
