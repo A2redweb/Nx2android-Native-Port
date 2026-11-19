@@ -156,7 +156,7 @@ class Ui(val c: Context) {
      * and buttons: [yes] (red) and [no] (grey; null leaves it out).
      */
     fun dialog(title: String? = null, message: String? = null, items: List<String> = emptyList(), selected: Int = -1, onPick: (Int) -> Unit = {},
-               yes: String? = null, onYes: () -> Unit = {}, no: String? = "Cancel"): android.app.Dialog {
+               yes: String? = null, onYes: () -> Unit = {}, no: String? = "Cancel", onNo: () -> Unit = {}): android.app.Dialog {
         val dlg = android.app.Dialog(c)
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val box = column(16).apply { background = shape(Theme.card, 14, Theme.line) }
@@ -174,7 +174,7 @@ class Ui(val c: Context) {
             }, lp(top = 6))
         }
         val buttons = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
-        if (no != null) buttons.addView(button(no) { dlg.dismiss() }.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { topMargin = dp(8); marginEnd = if (yes != null) dp(8) else 0 } })
+        if (no != null) buttons.addView(button(no) { dlg.dismiss(); onNo() }.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { topMargin = dp(8); marginEnd = if (yes != null) dp(8) else 0 } })
         if (yes != null) buttons.addView(button(yes, true) { dlg.dismiss(); onYes() }.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { topMargin = dp(8) } })
         box.addView(buttons, lp(top = 8))
         dlg.setContentView(box)

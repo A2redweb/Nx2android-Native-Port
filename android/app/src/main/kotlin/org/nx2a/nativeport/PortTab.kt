@@ -248,8 +248,17 @@ class PortTab(private val a: MainActivity, private val ui: Ui) : Tab {
         val e = entries[selected]
         val upd = extraUri ?: e.update?.uri
         val updName = if (extraUri != null) extraName else e.update?.name ?: ""
-        PortService.start(a, e.base.uri, e.base.name, upd, updName, e.dlc.map { it.uri to it.name }, options())
-        a.showTab("log")
+        val go = {
+            PortService.start(a, e.base.uri, e.base.name, upd, updName, e.dlc.map { it.uri to it.name }, options())
+            a.showTab("log")
+        }
+        // a port takes a while and the phone may stop an app that is not on the screen; the allowance below is what lets it go on in the background
+        if (a.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(a.packageName)) { go(); return }
+        ui.dialog(title = "Let the port run in the background",
+            message = "A port takes a while. Without this the phone may pause it when you leave the app. On Xiaomi phones also set this app's Battery saver to No restrictions (Settings > Apps > this app) and keep it pinned in the recent apps.",
+            yes = "Allow", onYes = {
+                try { a.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:${a.packageName}"))) } catch (_: Exception) {}
+            }, no = "Port anyway", onNo = { go() })
     }
 
     private fun leftovers(): List<File> = listOf(File(a.filesDir, "ports"), File(a.cacheDir, "decompressed"))
