@@ -95,6 +95,7 @@ class PortService : Service() {
                     val sh = if (xlate.isFile) Core.nativeBuildShaders(File(filesDir, "games").path, id, dst.path, xlate.path, translatorThreads(opt.jobs))
                              else "error: the shader translator is not part of this build"
                     File(dst, "shaders.txt").writeText(sh + "\n")
+                    if (!sh.startsWith("error")) File(dst, "captured.built").writeText("${captured(dst)}\n")
                     sh
                 }
                 Ports.result = File(dst, "name.txt").takeIf { it.exists() }?.readText()?.trim() ?: stem
@@ -135,12 +136,14 @@ class PortService : Service() {
                 Ports.say("Shaders of $shown: the game's own and the ones it captured while you played (${File(dst, "captured_shaders").list()?.size ?: 0} files)")
                 val xlate = File(applicationInfo.nativeLibraryDir, "libdmsh_xlate.so")
                 if (!xlate.isFile) throw Failure("the shader translator is not part of this build")
+                val used = captured(dst)
                 step(1, 1, "Build the shaders", notify = shown) {
                     val old = File(dst, "shaders.dmsv"); val bak = File(dst, "shaders.dmsv.old")
                     if (old.exists()) old.renameTo(bak)
                     val sh = Core.nativeBuildShaders(File(filesDir, "games").path, id, dst.path, xlate.path, translatorThreads(jobs))
                     if (sh.startsWith("error")) { File(dst, "shaders.dmsv").delete(); bak.renameTo(old) } else bak.delete()   // a failed build keeps the bundle that worked
                     File(dst, "shaders.txt").writeText(sh + "\n")
+                    if (!sh.startsWith("error")) File(dst, "captured.built").writeText("$used\n")
                     sh
                 }
                 Ports.stage = "finished"
@@ -328,6 +331,25 @@ class PortService : Service() {
             .build()
 
     companion object {
+        private fun captured(dst: File) = dst.resolve("captured_shaders").list { _, n -> n.endsWith(".bin") }?.size ?: 0
+
+        /**
+         * Shaders the game saved while it ran (captured_shaders/) are translated in without the player doing anything: when the app is opened again and a game has more
+         * saved than its last build used, the shader step runs for it. A build that adds nothing does not loop: the count it used is kept (captured.built).
+         */
+        fun autoShaders(ctx: Context, jobs: Int = 3): String? {
+            if (Ports.running) return null
+            val dirs = File(ctx.filesDir, "data").listFiles { f -> File(f, "ExeFS").isDirectory && File(f, "mods").isDirectory } ?: return null
+            for (g in dirs.sortedBy { it.name }) {
+                val now = captured(g)
+                val built = File(g, "captured.built").takeIf { it.exists() }?.readText()?.trim()?.toIntOrNull() ?: 0
+                if (now > built) {
+                    shaders(ctx, g.name, jobs)
+                    return File(g, "name.txt").takeIf { it.exists() }?.readText()?.trim() ?: g.name
+                }
+            }
+            return null
+        }
         fun shaders(ctx: Context, game: String, jobs: Int = 3) {
             ctx.startForegroundService(Intent(ctx, PortService::class.java).putExtra("shadersOf", game).putExtra("jobs", jobs))
         }

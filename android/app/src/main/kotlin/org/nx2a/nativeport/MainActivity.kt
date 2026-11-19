@@ -38,6 +38,14 @@ class MainActivity : Activity() {
     private var update: Updater.Info? = null
 
 
+    override fun onResume() {
+        super.onResume()
+        // back from a game: what it captured is translated in on its own
+        if (File(filesDir, "prod.keys").isFile) PortService.autoShaders(this)?.let {
+            android.widget.Toast.makeText(this, "Updating the shaders of $it (see the Log tab)", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("nx2a", MODE_PRIVATE)

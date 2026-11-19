@@ -46,7 +46,7 @@ class Ui(val c: Context) {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         clipChildren = false; clipToPadding = false
-        views.forEachIndexed { i, v -> addView(v, LinearLayout.LayoutParams(0, dp(46), 1f).apply { topMargin = dp(8); if (i > 0) leftMargin = dp(gap) }) }
+        views.forEachIndexed { i, v -> addView(v, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { topMargin = dp(8); if (i > 0) leftMargin = dp(gap) }) }
     }
 
     /** A row whose children keep their own width, the last one stretching (a field with its Browse button) */
@@ -95,7 +95,9 @@ class Ui(val c: Context) {
         background = shape(if (primary) Theme.red else Theme.grey, 8)
         stateListAnimator = null
         minHeight = 0
-        minimumHeight = 0
+        minimumHeight = dp(46)
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
         setPadding(dp(14), dp(11), dp(14), dp(11))
         setOnClickListener { onClick() }
         layoutParams = lp(top = 8)

@@ -29,6 +29,13 @@ class PlayActivity : GameActivity() {
             Os.setenv("DM_VK_DRIVER", it.lib, true)
             Os.setenv("DM_VK_DRIVER_DIR", it.dir.path + "/", true)
         }
+        // the last run died in the driver right after its first attachment-less pass: this run skips those passes (the host's DM_VK_X_NOTARGET=0, as before they existed)
+        try {
+            val last = File(root, "log.txt").takeIf { it.isFile }?.readText() ?: ""
+            val mark = File(root, "notarget")
+            if (last.contains("CRASH sig=11") && last.contains("attachment-less pass")) mark.writeText("1")   // kept: the next runs do not go back to the crash
+            if (mark.exists()) Os.setenv("DM_VK_X_NOTARGET", "0", true)
+        } catch (_: Exception) {}
         super.onCreate(savedInstanceState)
     }
 

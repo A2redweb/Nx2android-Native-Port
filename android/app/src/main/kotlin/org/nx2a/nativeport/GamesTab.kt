@@ -82,8 +82,8 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
                 ui.button("Driver") { pickDriver(g.name, shown) },
                 ui.button("Saves") { saves(shown) }))
             c.addView(ui.row(8,
-                ui.button("Copy log link") { shareLog(g, shown) },
-                ui.button("Update shaders") { updateShaders(g, shown) },
+                ui.button("Log link") { shareLog(g, shown) },
+                ui.button("Shaders") { updateShaders(g, shown) },
                 ui.button("Delete") {
                     a.ask("Delete $shown from this phone? Its saves are deleted too. Port it again from your dump any time.", "Delete") {
                         Thread { g.deleteRecursively(); a.runOnUiThread { refresh() } }.start()
