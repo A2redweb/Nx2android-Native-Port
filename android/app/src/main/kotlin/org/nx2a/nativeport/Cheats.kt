@@ -75,4 +75,31 @@ object Cheats {
         File(dir, "cheats_on.txt").writeText(on.joinToString("\n") + (if (on.isEmpty()) "" else "\n"))
         return "$n cheats for your build of the game."
     }
+
+    /**
+     * Cheats pasted by the player (Atmosphère text from cheatslips, GBAtemp or a cheat file: "[Name]" then lines of 8-digit hex words) are added to the game's cheats.txt;
+     * one with a name already there replaces it. Only lines that are cheat names or hex words are kept. Returns how many cheats were added.
+     */
+    fun addText(dir: File, text: String): Int {
+        val blocks = LinkedHashMap<String, MutableList<String>>()
+        var cur: MutableList<String>? = null
+        for (raw in text.lines()) {
+            val l = raw.trim()
+            if (l.length > 2 && (l[0] == '[' || l[0] == '{') && (l.last() == ']' || l.last() == '}')) { cur = ArrayList(); blocks[l] = cur }
+            else if (cur != null && Regex("^[0-9A-Fa-f]{8}( [0-9A-Fa-f]{8})*$").matches(l)) cur.add(l.uppercase())
+        }
+        blocks.entries.removeAll { it.value.isEmpty() }
+        if (blocks.isEmpty()) return 0
+        val old = LinkedHashMap<String, List<String>>()
+        File(dir, "cheats.txt").takeIf { it.isFile }?.let { f ->
+            var k: String? = null
+            for (raw in f.readLines()) {
+                val l = raw.trim()
+                if (l.length > 2 && (l[0] == '[' || l[0] == '{')) { k = l; old[l] = ArrayList() } else if (k != null && l.isNotEmpty()) (old[k] as MutableList<String>).add(l)
+            }
+        }
+        for ((k, v) in blocks) { old.remove(k); old[k] = v }
+        File(dir, "cheats.txt").writeText(old.entries.joinToString("") { (k, v) -> k + "\n" + v.joinToString("\n") + "\n\n" })
+        return blocks.size
+    }
 }

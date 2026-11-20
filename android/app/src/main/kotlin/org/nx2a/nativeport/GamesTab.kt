@@ -141,6 +141,8 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
                 }.start()
             })
             box.addView(status, ui.lp(top = 4))
+            box.addView(ui.sm("No cheats online for your version? Paste them here: the text of a cheat for your build from cheatslips or GBAtemp ([Name] then lines of hex)."), ui.lp(top = 8))
+            box.addView(ui.button("Paste cheats") { pasteCheats(g) { build() } }, ui.lp(top = 4))
             for (c in cs.filter { !it.master }) {
                 box.addView(ui.check(c.name, c.on) { v -> Cheats.setOn(g, c.name, v) })
             }
@@ -153,6 +155,29 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
             val m = a.resources.displayMetrics
             setLayout((m.widthPixels * 0.92f).toInt().coerceAtMost(ui.dp(480)), (m.heightPixels * 0.88f).toInt())
             setDimAmount(0.6f)
+        }
+        dlg.show()
+    }
+
+    private fun pasteCheats(g: File, done: () -> Unit) {
+        val dlg = android.app.Dialog(a)
+        dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val box = ui.column(16).apply { background = ui.shape(Theme.card, 14, Theme.line) }
+        box.addView(ui.text("Paste cheats", 17f, Theme.fg, true), ui.lp(bottom = 4))
+        box.addView(ui.sm("Paste the cheat text for your game's exact version (the build ID must be the one of your version, or the addresses will be wrong). Each cheat is a [Name] line followed by hex lines."), ui.lp(bottom = 8))
+        val et = ui.input("[Max money]\n04000000 00123456 00989680").apply { setSingleLine(false); minLines = 6; gravity = android.view.Gravity.TOP }
+        box.addView(et)
+        box.addView(ui.row(8, ui.button("Cancel") { dlg.dismiss() }, ui.button("Add", true) {
+            val n = Cheats.addText(g, et.text.toString())
+            android.widget.Toast.makeText(a, if (n == 0) "No cheat found in that text" else "$n cheats added", android.widget.Toast.LENGTH_LONG).show()
+            dlg.dismiss(); if (n > 0) done()
+        }), ui.lp(top = 10))
+        dlg.setContentView(ui.scroll(box))
+        dlg.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            val m = a.resources.displayMetrics
+            setLayout((m.widthPixels * 0.92f).toInt().coerceAtMost(ui.dp(480)), (m.heightPixels * 0.8f).toInt())
+            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
         dlg.show()
     }
