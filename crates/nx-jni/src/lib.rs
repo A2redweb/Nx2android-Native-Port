@@ -124,6 +124,17 @@ pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeBuildShaders(e
     })
 }
 
+/// Translates the shaders the game captured into `shaders_live.dmsv` while it runs: "ok: <count>" or "error: <message>".
+#[no_mangle]
+pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeBuildLive(env: JNIEnv, _c: JClass, profiles: JString, id: JString, dir: JString, xlate: JString, threads: i32) -> JString {
+    let (profiles, id, dir, xlate) = (get(env, profiles), get(env, id), get(env, dir), get(env, xlate));
+    let r = nx_core::build_live(std::path::Path::new(&profiles), &id, std::path::Path::new(&dir), vec![xlate], threads.max(1) as usize);
+    make(env, &match r {
+        Ok(n) => format!("ok: {n}"),
+        Err(e) => format!("error: {e}"),
+    })
+}
+
 /// The build ID of the game's main module ("ok: <32 hex>") and the warehouse URL of its FPSLocker config ("ok: <id>\t<url>").
 #[no_mangle]
 pub unsafe extern "system" fn Java_org_nx2a_nativeport_Core_nativeFpsPlan(env: JNIEnv, _c: JClass, dir: JString, title_id: JString) -> JString {

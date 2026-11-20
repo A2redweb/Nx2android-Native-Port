@@ -178,4 +178,57 @@ patch('android/gfx_vk_present.c', '    cv_rrect(cv, 0, 0, p[2], p[3], rh * 0.18f
       '        float x = a[0] + a[2] + rh * 0.02f, w = fmaxf(2, rh * 0.05f), top = a[1] + rh * 0.1f, bot = b[1] + b[3] - rh * 0.1f, h = fmaxf(rh * 0.3f, (bot - top) * 5 / N);\n'
       '        float y = top + (bot - top - h) * (float)dm_cheat_offset() / (float)(N - 5);\n'
       '        cv_rrect(cv, x, top, x + w, bot, w / 2, C_OFF); cv_rrect(cv, x, y, x + w, y + h, w / 2, C_DIM);\n    }\n    for (int row = 0; row < OVM_ROWS; row++) {\n        int it = ov_menu_item(tab, row);')
+
+# live shader bundle: the app translates the shaders the game captured (captured_shaders/) while it plays into shaders_live.dmsv; a lookup the bundle misses checks that file
+# (at most every 1.5 s), so a shader no game file holds is drawn within seconds instead of after the next port
+patch('android/gfx_vk_shader.c', 'static const bent *find(uint64_t key) {\n    uint32_t lo = 0, hi = g_nent;\n    while (lo < hi) { uint32_t m = (lo + hi) / 2; uint64_t k; memcpy(&k, &g_ent[m].key, 8); if (k < key) lo = m + 1; else hi = m; }\n    if (lo < g_nent) { uint64_t k; memcpy(&k, &g_ent[lo].key, 8); if (k == key) return &g_ent[lo]; }\n    return NULL;\n}\n',
+r"""typedef struct { const uint8_t *b; size_t sz; const bent *e; uint32_t n; } lbun_t;
+static lbun_t g_live[64]; static int g_nlive;   // live bundles, oldest first, published with a release store; a mapping is never unmapped (entries may be in use)
+static const bent *find_in(const bent *t, uint32_t n, uint64_t key) {
+    uint32_t lo = 0, hi = n;
+    while (lo < hi) { uint32_t m = (lo + hi) / 2; uint64_t k; memcpy(&k, &t[m].key, 8); if (k < key) lo = m + 1; else hi = m; }
+    if (lo < n) { uint64_t k; memcpy(&k, &t[lo].key, 8); if (k == key) return &t[lo]; }
+    return NULL;
+}
+static const uint8_t *ebase(const bent *e) {   // the mapping an entry is in
+    int n = __atomic_load_n(&g_nlive, __ATOMIC_ACQUIRE);
+    for (int i = n - 1; i >= 0; i--) if ((const uint8_t *)e >= g_live[i].b && (const uint8_t *)e < g_live[i].b + g_live[i].sz) return g_live[i].b;
+    return g_bundle;
+}
+static void live_check(void) {
+    static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER; static long long last; static time_t mt; static off_t msz;
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); long long now = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    if (now - __atomic_load_n(&last, __ATOMIC_RELAXED) < 1500 || pthread_mutex_trylock(&mu)) return;
+    __atomic_store_n(&last, now, __ATOMIC_RELAXED);
+    const char *r = getenv("DM_ROOT"); char path[1100]; snprintf(path, sizeof path, "%s/shaders_live.dmsv", r ? r : "."); struct stat st;
+    if (!stat(path, &st) && st.st_size >= 12 && (st.st_mtime != mt || st.st_size != msz) && g_nlive < 64) {
+        mt = st.st_mtime; msz = st.st_size;
+        int fd = open(path, O_RDONLY | O_CLOEXEC); const uint8_t *b = fd >= 0 ? mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0) : MAP_FAILED; if (fd >= 0) close(fd);
+        if (b != MAP_FAILED) {
+            uint32_t ver, n, bad = 0; memcpy(&ver, b + 4, 4); memcpy(&n, b + 8, 4); const bent *t = (const bent *)(b + 12); uint64_t sz = (uint64_t)st.st_size, table_end = 12 + 32ull * n;
+            if (memcmp(b, "DMSV", 4) || ver < 1 || ver > 2 || table_end > sz) bad = 1;
+            else for (uint32_t i = 0; i < n && !bad; i++) { const bent *e = &t[i];
+                if (e->stage > 5 || (i && e->key <= t[i - 1].key) || (ver == 1 && e->spv_size) || e->spv_off < table_end || (uint64_t)e->spv_off + e->spv_len > sz ||
+                    e->refl_off < table_end || (uint64_t)e->refl_off + e->refl_len > sz || e->refl_len < 20) bad = 1; }
+            if (bad) { VKLOG("[RED] %s is not a usable shader bundle", path); munmap((void *)b, (size_t)sz); }
+            else { g_live[g_nlive] = (lbun_t){b, (size_t)sz, t, n}; __atomic_store_n(&g_nlive, g_nlive + 1, __ATOMIC_RELEASE); VKLOG("live shader bundle %s: %u shaders translated while playing", path, n); }
+        }
+    }
+    pthread_mutex_unlock(&mu);
+}
+static const bent *find(uint64_t key) {
+    const bent *e = find_in(g_ent, g_nent, key); if (e) return e;
+    for (int pass = 0; pass < 2; pass++) {
+        int n = __atomic_load_n(&g_nlive, __ATOMIC_ACQUIRE);
+        for (int i = n - 1; i >= 0; i--) if ((e = find_in(g_live[i].e, g_live[i].n, key))) return e;
+        if (!pass) live_check();
+    }
+    return NULL;
+}
+""")
+patch('android/gfx_vk_shader.c', 'const bent *e = g_bundle ? find(key) : NULL; return e ? (int)e->stage : -1; }', 'const bent *e = find(key); return e ? (int)e->stage : -1; }')
+patch('android/gfx_vk_shader.c', 'if (w && !e->spv_size) memcpy(w, g_bundle + e->spv_off, n);', 'if (w && !e->spv_size) memcpy(w, ebase(e) + e->spv_off, n);')
+patch('android/gfx_vk_shader.c', 'ZSTD_decompressDCtx(dc, w, n, g_bundle + e->spv_off, e->spv_len)', 'ZSTD_decompressDCtx(dc, w, n, ebase(e) + e->spv_off, e->spv_len)')
+patch('android/gfx_vk_shader.c', '    const bent *e = g_bundle ? find(key) : NULL;\n    if (!e) { nvn_hm_put(&g_shaders, &hk, (void *)1); pthread_mutex_unlock(&g_sh_mu);', '    const bent *e = find(key);\n    if (!e) { pthread_mutex_unlock(&g_sh_mu);   // (not remembered as missing: a live bundle may bring it)')
+patch('android/gfx_vk_shader.c', 'const uint8_t *r = g_bundle + e->refl_off;', 'const uint8_t *r = ebase(e) + e->refl_off;')
 print(f'{len(games)} profiles, {len(names)} scalar fields, modules ≤{modmax}, display versions ≤{vermax}, {aov[0][0]} gamepad controls')

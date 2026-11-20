@@ -21,5 +21,6 @@ object Core {
     external fun nativeTitle(keys: String, path: String, name: String): String
     external fun nativeFpsPlan(dir: String, titleId: String): String
     external fun nativeFpsConvert(dir: String, titleId: String, text: String, source: String): String
+    external fun nativeBuildLive(profiles: String, id: String, dir: String, xlate: String, threads: Int): String
     external fun nativeBuildShaders(profiles: String, id: String, dir: String, xlate: String, threads: Int): String
 }

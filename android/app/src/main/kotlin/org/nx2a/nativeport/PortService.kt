@@ -143,7 +143,7 @@ class PortService : Service() {
                     val sh = Core.nativeBuildShaders(File(filesDir, "games").path, id, dst.path, xlate.path, translatorThreads(jobs))
                     if (sh.startsWith("error")) { File(dst, "shaders.dmsv").delete(); bak.renameTo(old) } else bak.delete()   // a failed build keeps the bundle that worked
                     File(dst, "shaders.txt").writeText(sh + "\n")
-                    if (!sh.startsWith("error")) File(dst, "captured.built").writeText("$used\n")
+                    if (!sh.startsWith("error")) { File(dst, "captured.built").writeText("$used\n"); File(dst, "shaders_live.dmsv").delete() }   // the bundle holds them now
                     sh
                 }
                 Ports.stage = "finished"

@@ -249,6 +249,64 @@ pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<Stri
     Ok(format!("{} shaders ({} unreadable files{cap}{pack_note}){bad}", rep.emitted, skipped.len()))
 }
 
+/// Builds `shaders_live.dmsv` of the game's data folder from the shaders the game captured (captured_shaders/) alone, while the game runs: the host opens it beside
+/// `shaders.dmsv` and looks a shader up in it when the bundle lacks one (gfx_vk_shader.c, live bundle), so a shader no game file holds is drawn within seconds of the
+/// first time the game sets it instead of after the next port. Returns how many shaders it holds.
+pub fn build_live(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<String>, threads: usize) -> Result<usize, String> {
+    use nx_shader::json::Json;
+    let dir = find_profile(profiles, id)?;
+    let g = nx_profile::GameProfile::load(&dir).map_err(|e| format!("{id}: {e}"))?;
+    let mut facts = std::collections::BTreeMap::new();
+    if let Ok(t) = std::fs::read_to_string(dir.join("shader_facts.tsv")) {
+        for l in t.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
+            let (k, j) = l.split_once('\t').ok_or("shader_facts.tsv: bad row")?;
+            facts.insert(k.to_string(), Json::parse(j).map_err(|e| format!("shader_facts.tsv {k}: {e}"))?);
+        }
+    }
+    let mut handles = std::collections::BTreeMap::new();
+    if let Ok(t) = std::fs::read_to_string(dir.join("android_shader_handles.tsv")) {
+        let hex = |s: &str| u32::from_str_radix(s.trim_start_matches("0x"), 16).map_err(|_| format!("android_shader_handles.tsv: bad number {s}"));
+        for l in t.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
+            let f: Vec<&str> = l.split('\t').collect();
+            if f.len() < 4 {
+                return Err("android_shader_handles.tsv: bad row".into());
+            }
+            handles.insert(f[0].to_string(), (hex(f[1])?, hex(f[2])?, f[3].parse::<usize>().map_err(|_| "android_shader_handles.tsv: bad site count")?));
+        }
+    }
+    let work = game_dir.join("shaders.live.work");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let spool = work.join("spool.bin");
+    std::fs::write(&spool, b"").map_err(|e| e.to_string())?;
+    let mut index = nx_shader::scan::Index { spool, ents: Default::default() };
+    let (n, _notes) = index.add_captures(&game_dir.join("captured_shaders"))?;
+    if n == 0 {
+        let _ = std::fs::remove_dir_all(&work);
+        return Ok(0);
+    }
+    let params = nx_shader::pipeline::Params {
+        xlate,
+        work: work.join("xlate"),
+        threads,
+        chunk: 64,
+        subgroup: g.get("android_subgroup_size").and_then(|v| v.trim().parse().ok()).unwrap_or(128),
+        dynamic_slots: matches!(g.get("android_dynamic_slots").as_deref().map(str::trim), Some("on" | "1" | "true" | "yes")),
+        facts,
+        handles,
+    };
+    let tmp = game_dir.join("shaders_live.dmsv.part");
+    let rep = nx_shader::pipeline::build(&index, &params, &tmp, &|_, _, _| {});
+    let _ = std::fs::remove_dir_all(&work);
+    let rep = rep?;
+    if rep.emitted == 0 {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("none of {n} captured shaders translated ({} failed)", rep.failed.len()));
+    }
+    std::fs::rename(&tmp, game_dir.join("shaders_live.dmsv")).map_err(|e| e.to_string())?;
+    Ok(rep.emitted)
+}
+
 /// The games list as JSON (`{"games":[...]}`) or `{"error":"..."}`. `overlay` is the text of upstream's `overlay_default.tsv`, when the controls should be validated.
 pub fn games_json(profiles_dir: &str, overlay: &str, all: bool) -> String {
     let controls = (!overlay.is_empty()).then(|| nx_profile::overlay_controls(overlay));

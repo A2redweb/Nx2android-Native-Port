@@ -44,7 +44,35 @@ class PlayActivity : GameActivity() {
             }
         } catch (_: Exception) {}
         super.onCreate(savedInstanceState)
+        liveShaders(id, root)
     }
+
+    @Volatile private var live = true
+
+    /**
+     * Shaders no game file holds are saved by the game as it meets them (captured_shaders/); this translates them into shaders_live.dmsv while the game runs, and the host
+     * (gfx_vk_shader.c) opens that file beside the bundle, so such a shader is drawn within seconds of its first use instead of after the next shader update.
+     */
+    private fun liveShaders(id: String, root: File) {
+        val xlate = File(applicationInfo.nativeLibraryDir, "libdmsh_xlate.so")
+        if (!xlate.isFile) return
+        Thread {
+            try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) } catch (_: Exception) {}
+            var done = -1
+            while (live) {
+                try {
+                    Thread.sleep(3000)
+                    val n = File(root, "captured_shaders").list { _, f -> f.endsWith(".bin") }?.size ?: 0
+                    if (n == 0 || n == done) continue
+                    val r = Core.nativeBuildLive(File(filesDir, "games").path, id, root.path, xlate.path, 1)
+                    done = n
+                    android.util.Log.i("nx2a", "live shaders ($n captured): $r")
+                } catch (_: InterruptedException) { return@Thread } catch (e: Throwable) { android.util.Log.w("nx2a", "live shaders failed", e); done = -1; Thread.sleep(20000) }
+            }
+        }.also { it.isDaemon = true; it.name = "live-shaders" }.start()
+    }
+
+    override fun onDestroy() { live = false; super.onDestroy() }
 
     companion object { const val EXTRA_GAME = "game" }
 }
