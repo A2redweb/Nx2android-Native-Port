@@ -203,7 +203,7 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         fun lines() = et.text.toString().lines().map { it.trim() }.filter { it.isNotEmpty() }
         val za = g.name.equals("0100F43008C44000", true)
         val all = if (za) presets + listOf(
-            Triple("DM_CAM_SENS=3", "Faster camera", "How fast the right half of the screen turns the camera for a swipe of a given speed. 1 is the normal speed, 3 turns about three times as much for the same swipe (any number from 0.1 to 50 works: write DM_CAM_SENS=6 below for more, 0.5 for less). The game's own camera speed in its options adds to it. Pokémon Legends: Z-A only."),
+            Triple("DM_CAM_SENS=3", "Faster camera", "How far a swipe on the right half of the screen turns the camera: the distance you swipe is the turn, and a flick keeps turning a moment after the finger has left, as in an Android game. 1 is the normal amount, 3 turns about three times as far (any number from 0.1 to 50 works: write DM_CAM_SENS=6 below for more, 0.5 for less). The game's own camera speed in its options limits how fast it turns. Pokémon Legends: Z-A only."),
             Triple("DM_CAM_ZONE=0", "Camera as a stick", "Turns the swipe camera off, back to the drawn right stick. Pokémon Legends: Z-A only.")) else presets
         for ((line, title, what) in all) {
             box.addView(ui.check(title, line in lines()) { on ->
