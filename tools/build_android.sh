@@ -8,7 +8,7 @@ cd "$here"
 src=${1:-}
 if [ -z "$src" ]; then
   # pinned: the profiles and host are built from the upstream commit this app was tested with (UPSTREAM_REF overrides it)
-  ref=${UPSTREAM_REF:-eafa740825d6fdb1c56112c3875ded8e04566cea}
+  ref=${UPSTREAM_REF:-d6980c39410189dc426f007822bc53f96a624171}
   tmp=$(mktemp -d); git init -q "$tmp/up"; git -C "$tmp/up" fetch -q --depth 1 https://github.com/shirai91/nx2android "$ref"; git -C "$tmp/up" checkout -q FETCH_HEAD; src=$tmp/up
 fi
 cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build --release -p nx-jni

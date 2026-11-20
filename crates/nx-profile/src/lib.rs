@@ -55,7 +55,18 @@ impl GameProfile {
 }
 
 pub const STATUSES: [&str; 4] = ["playable", "wip", "boots", "experimental"];
-const SINGLE: [&str; 7] = ["status", "tested", "package", "orientation", "requires", "sysdata", "romfs"];
+const SINGLE: [&str; 12] = ["status", "tested", "package", "orientation", "requires", "sysdata", "romfs", "vulkan_driver", "pacing", "readme_name", "readme_image", "readme_tag"];
+/// `pacing <preset>`: the frame-pacing policy as env rows, which go before the profile's own (upstream's android_profile.py PACING)
+fn pacing_rows(p: &str) -> Option<&'static [&'static str]> {
+    Some(match p {
+        "adaptive" => &[],
+        "steady" => &["DM_ADAPTIVE_FPS=0"],
+        "fixed60" => &["DM_FPS_TARGET=60", "DM_ADAPTIVE_FPS=0"],
+        "fixed30" => &["DM_FPS_TARGET=30", "DM_ADAPTIVE_FPS=0"],
+        "game" => &["DM_FPS_TARGET=0", "DM_ADAPTIVE_FPS=0"],
+        _ => return None,
+    })
+}
 const REPEAT: [&str; 3] = ["setting", "env", "overlay"];
 const LAYOUTS: [&str; 2] = ["tablet", "phone"];
 
@@ -191,7 +202,9 @@ impl AndroidProfile {
     }
     /// `KEY=VALUE` rows: the host switches the game needs (the data pack's `env.txt`).
     pub fn env(&self) -> Vec<&str> {
-        self.values("env")
+        let mut v: Vec<&str> = pacing_rows(&self.get("pacing", "adaptive")).unwrap_or(&[]).to_vec();
+        v.extend(self.values("env"));
+        v
     }
     /// The pause menu's defaults, `(name, value)`.
     pub fn settings(&self) -> Vec<(&str, &str)> {
@@ -230,6 +243,9 @@ impl AndroidProfile {
             if !ok {
                 bad.push(format!("setting {v:?}: overlay=0|1, rumble=0|1, docked=0|1, fps=0|1, opacity=20..80 by 5"));
             }
+        }
+        if pacing_rows(&self.get("pacing", "adaptive")).is_none() {
+            bad.push(format!("pacing {:?}: one of adaptive, steady, fixed60, fixed30, game", self.get("pacing", "")));
         }
         for v in self.values("env") {
             if !is_env_row(v) {

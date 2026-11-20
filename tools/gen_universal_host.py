@@ -16,6 +16,8 @@ up, work, inc = (Path(a).resolve() for a in sys.argv[1:4])
 dm = work / 'dm'
 if dm.exists(): shutil.rmtree(dm)
 shutil.copytree(up / 'nxnative' / 'dm', dm, symlinks=True)
+_ap = dm / 'android' / 'tools' / 'android_profile.py'   # the profile check wants the README images of the whole repository, which this copy of dm/ does not carry
+_t = _ap.read_text(); _ap.write_text(_t.replace("not (ANDROID.parents[2] / self.get('readme_image')).is_file()", "False"))
 sys.path.insert(0, str(dm / 'games')); sys.path.insert(0, str(dm / 'android' / 'tools'))
 import game, android_profile   # noqa: E402
 
@@ -92,10 +94,17 @@ body = ',\n'.join('{{' + a[1].strip() + '},\n{' + a[2] + '}}' for a in aov)
     f'#define DM_AOV_N {aov[0][0]}\n#define DM_NGAMES {len(games)}\n#define DM_AOV_ALL ' + body.replace('\n', ' \\\n') + '\n')
 
 # patches: (file, old, new); each must match exactly once
+FAILED = []
 def patch(rel, old, new):
-    f = dm / rel; s = f.read_text(encoding='utf-8')
-    if s.count(old) != 1: sys.exit(f'[RED] {rel}: upstream changed, the patch no longer matches:\n{old}')
+    f = dm / rel; s = f.read_text(encoding='utf-8') if f.is_file() else ''
+    if s.count(old) != 1: FAILED.append(f'[RED] {rel}: upstream changed, the patch no longer matches ({s.count(old)} places):\n{old[:300]}'); return
     f.write_text(s.replace(old, new), encoding='utf-8')
+def patch_any(rels, old, new):
+    # the file of the list that holds `old` exactly once (upstream moves code between a file and its .inc parts)
+    for rel in rels:
+        f = dm / rel
+        if f.is_file() and f.read_text(encoding='utf-8').count(old) == 1: return patch(rel, old, new)
+    FAILED.append(f'[RED] {rels[0]} (or {len(rels) - 1} more): no file holds the patch exactly once:\n{old[:300]}')
 patch('android/overlay_layout.h', 'static const ov_ctl OV_LAYOUTS[2][DM_AOV_N] = {{DM_AOV_TABLET}, {DM_AOV_PHONE}};',
       'static const ov_ctl OV_LAYOUTS_ALL[DM_NGAMES][2][DM_AOV_N] = {DM_AOV_ALL};\n#define OV_LAYOUTS (OV_LAYOUTS_ALL[g_dm_prof_index])')
 # saves: DM_SAVES_DIR (set by the app) puts the exported saves in a folder the player can open, instead of <files>/saves
@@ -106,7 +115,7 @@ patch('android/saves_android.c', 'snprintf(g_dir, sizeof g_dir, "%s/saves", file
       '    mkdir(g_dir, 0770);')
 # the pause menu's Quit: the Resume row is split, Resume on the left and Quit on the right (a touch on the right half ends the game)
 # DM_VK_LIST_AT re-armable: the app sets a changed value (the same present number with a different tail) to trace another frame while the game runs (the pass list stays upstream's)
-patch('android/gfx_vk_exec.c', 'static uint64_t until; static int done; const char *la = getenv("DM_VK_LIST_AT");',
+patch_any(['android/gfx_vk_exec.c', 'android/gfx_vk_exec_state.inc'], 'static uint64_t until; static int done; const char *la = getenv("DM_VK_LIST_AT");',
       'static uint64_t until; static int done; static char lastla[32]; const char *la = getenv("DM_VK_LIST_AT"); if (la && strcmp(la, lastla)) { snprintf(lastla, sizeof lastla, "%s", la); done = 0; until = 0; }')
 # Camera by touch (DM_CAM_ZONE=<where the zone starts, as a fraction of the window's width, e.g. 0.5>; 0 or unset = off): a finger that goes down on no control in that part of the
 # window turns the camera by how fast it swipes (right stick deflection = the finger's speed, as an Android game's camera), and the drawn right stick is hidden; the camera stops
@@ -293,3 +302,5 @@ patch('android/gfx_vk_shader.c', 'ZSTD_decompressDCtx(dc, w, n, g_bundle + e->sp
 patch('android/gfx_vk_shader.c', '    const bent *e = g_bundle ? find(key) : NULL;\n    if (!e) { nvn_hm_put(&g_shaders, &hk, (void *)1); pthread_mutex_unlock(&g_sh_mu);', '    const bent *e = find(key);\n    if (!e) { pthread_mutex_unlock(&g_sh_mu);   // (not remembered as missing: a live bundle may bring it)')
 patch('android/gfx_vk_shader.c', 'const uint8_t *r = g_bundle + e->refl_off;', 'const uint8_t *r = ebase(e) + e->refl_off;')
 print(f'{len(games)} profiles, {len(names)} scalar fields, modules ≤{modmax}, display versions ≤{vermax}, {aov[0][0]} gamepad controls')
+if FAILED:
+    print('\n'.join(FAILED)); sys.exit(f'{len(FAILED)} patches no longer match this upstream')
