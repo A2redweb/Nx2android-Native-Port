@@ -188,6 +188,7 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         Triple("DM_VK_NO_ZEROCOPY=1", "Copy GPU memory", "The game's memory is normally shared with the GPU without copying. This copies it instead, which rules out the GPU reading what the game has not finished writing (parts floating or missing, flickering). Slower."),
         Triple("DM_VK_UBD_HEAP=0", "Read uniforms from scratch", "Deferred uniform updates keep no copy in ordinary memory and are read back from scratch. Try it when objects are placed or lit wrongly."),
         Triple("DM_OPMODE=0", "Handheld mode", "Runs the game as the Switch does in handheld mode: a smaller picture and less for the GPU to do. Helps speed on weaker phones."),
+        Triple("DM_RENDER_SCALE=0.75", "Lower resolution (75%)", "Draws the picture at 75% of the size and scales it up: faster on a weaker GPU and sharper-looking than a lower frame rate. Any number from 0.5 to 1.0 works: write DM_RENDER_SCALE=0.6 below for lower. Works in games that take the setting; if the picture does not change, that game does not."),
         Triple("DM_FPS_TARGET=0", "The game's own timing", "Turns off the frame-rate change from the community configs, so the game runs at the speed it was made for."),
     )
 
@@ -202,7 +203,7 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         fun lines() = et.text.toString().lines().map { it.trim() }.filter { it.isNotEmpty() }
         val za = g.name.equals("0100F43008C44000", true)
         val all = if (za) presets + listOf(
-            Triple("DM_CAM_SENS=1.6", "Faster camera", "How fast the right half of the screen turns the camera for a swipe of a given speed. 1 is the normal speed; try 1.6 for faster, or write DM_CAM_SENS=0.6 below for slower. Pokémon Legends: Z-A only."),
+            Triple("DM_CAM_SENS=3", "Faster camera", "How fast the right half of the screen turns the camera for a swipe of a given speed. 1 is the normal speed, 3 turns about three times as much for the same swipe (any number from 0.1 to 50 works: write DM_CAM_SENS=6 below for more, 0.5 for less). The game's own camera speed in its options adds to it. Pokémon Legends: Z-A only."),
             Triple("DM_CAM_ZONE=0", "Camera as a stick", "Turns the swipe camera off, back to the drawn right stick. Pokémon Legends: Z-A only.")) else presets
         for ((line, title, what) in all) {
             box.addView(ui.check(title, line in lines()) { on ->
