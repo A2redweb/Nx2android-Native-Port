@@ -108,6 +108,27 @@ patch('android/saves_android.c', 'snprintf(g_dir, sizeof g_dir, "%s/saves", file
 # DM_VK_LIST_AT re-armable: the app sets a changed value (the same present number with a different tail) to trace another frame while the game runs (the pass list stays upstream's)
 patch('android/gfx_vk_exec.c', 'static uint64_t until; static int done; const char *la = getenv("DM_VK_LIST_AT");',
       'static uint64_t until; static int done; static char lastla[32]; const char *la = getenv("DM_VK_LIST_AT"); if (la && strcmp(la, lastla)) { snprintf(lastla, sizeof lastla, "%s", la); done = 0; until = 0; }')
+# Camera by touch (DM_CAM_ZONE=<where the zone starts, as a fraction of the window's width, e.g. 0.5>; 0 or unset = off): a finger that goes down on no control in that part of the
+# window is the right stick, centred where it lands, and the drawn right stick is hidden. The app sets it for games that want it (Pokémon Legends: Z-A) and Extra settings can switch it.
+patch('android/front_android.c', 'static _Atomic uint64_t g_touch_btn;',
+      '''static int g_cam_id = -1; static float g_cam_ox, g_cam_oy;   // the camera finger (touch thread only)
+static float cam_zone(void) { static float z = -1; if (z < 0) { const char *e = getenv("DM_CAM_ZONE"); z = e ? (float)atof(e) : 0; if (z < 0 || z >= 1) z = 0; } return z; }
+static _Atomic uint64_t g_touch_btn;''')
+patch('android/front_android.c', 'int dm_overlay_off(int layout, int ctl) { return !atomic_load(&g_edit) && dm_overlay_hidden(layout, ctl); }',
+      'int dm_overlay_off(int layout, int ctl) { return !atomic_load(&g_edit) && (dm_overlay_hidden(layout, ctl) || (cam_zone() > 0 && layout >= 0 && layout <= 1 && ctl >= 0 && ctl < OV_N && OV_LAYOUTS[layout][ctl].kind == OV_STICK_R)); }')
+patch('android/front_android.c', '        g_ptr_ctl[id] = c + 1;\n',
+      '''        g_ptr_ctl[id] = c + 1;
+        if (act == AMOTION_EVENT_ACTION_DOWN) g_cam_id = -1;   // (a first finger: none of an earlier touch is still down)
+        if (c < 0 && cam_zone() > 0 && g_cam_id < 0 && dm_overlay_visible() == 1 && AMotionEvent_getX(e, (size_t)i) >= W * cam_zone()) { g_cam_id = id; g_cam_ox = AMotionEvent_getX(e, (size_t)i); g_cam_oy = AMotionEvent_getY(e, (size_t)i); }
+''')
+patch('android/front_android.c', '            g_ptr_ctl[id] = 0; continue;',
+      '            if (id == g_cam_id) g_cam_id = -1;\n            g_ptr_ctl[id] = 0; continue;')
+patch('android/front_android.c', '        if (c < 0) { if (n < 16) { t[n].id',
+      '''        if (c < 0 && id == g_cam_id) {   // the camera finger: the right stick, as far from where it landed as it has moved (a stick's radius is 0.15 of the window's height)
+            float dx = (x - g_cam_ox) / (H * 0.15f), dy = (y - g_cam_oy) / (H * 0.15f), m = sqrtf(dx * dx + dy * dy); if (m > 1) { dx /= m; dy /= m; }
+            rx = (int32_t)(dx * DM_STICK_MAX); ry = (int32_t)(-dy * DM_STICK_MAX); continue;
+        }
+        if (c < 0) { if (n < 16) { t[n].id''')
 patch('android/overlay_layout.h', 'OVM_AUDIO, OVM_RESUME, OVM_TAB, OVM_N };', 'OVM_AUDIO, OVM_CHEAT0, OVM_CHEAT1, OVM_CHEAT2, OVM_CHEAT3, OVM_CHEAT4, OVM_RESUME, OVM_QUIT, OVM_TAB, OVM_N };')
 patch('android/gfx_vk_present.c', '"Audio output", "Resume", ""};', '"Audio output", "", "", "", "", "", "Resume", "Quit", ""};')
 patch('android/gfx_vk_present.c', 'cv_text(cv, r[0] + (rw - cv_text_w("Resume", is)) / 2, cy, "Resume", is, C_ACCENT); continue; }',
