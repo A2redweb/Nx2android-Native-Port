@@ -38,7 +38,7 @@ class PlayActivity : GameActivity() {
             if (mark.exists()) Os.setenv("DM_VK_X_NOTARGET", "0", true)
         } catch (_: Exception) {}
         // the game's own control defaults (a line in Extra settings overrides them): Pokémon Legends: Z-A turns the camera by dragging on the right half of the screen
-        if (id == "0100F43008C44000") Os.setenv("DM_CAM_ZONE", "0.5", true)
+        if (id == "0100F43008C44000") { Os.setenv("DM_CAM_ZONE", "0.5", true); Os.setenv("DM_THEME", "pokemonza", true) }   // (its pad pack: the letters with their actions' icons)
         // settings the player (or whoever is helping) typed in the game's sheet: KEY=VALUE lines, applied last
         try {
             File(root, "env_user.txt").takeIf { it.isFile }?.readLines()?.forEach { l ->

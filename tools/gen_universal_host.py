@@ -129,6 +129,10 @@ patch('android/front_android.c', '        if (c < 0) { if (n < 16) { t[n].id',
             rx = (int32_t)(dx * DM_STICK_MAX); ry = (int32_t)(-dy * DM_STICK_MAX); continue;
         }
         if (c < 0) { if (n < 16) { t[n].id''')
+# the gamepad's pack by game: DM_THEME names a folder of the app's assets (themes/<name>/theme.tsv and its atlases) in place of the APK's one assets/overlay
+patch('android/overlay_theme.c', '    AAssetManager *am = dm_front_assets(); AAsset *a = am ? AAssetManager_open(am, name, AASSET_MODE_BUFFER) : NULL;',
+      '    char mapped[160]; const char *th = getenv("DM_THEME"); if (th && *th && !strncmp(name, "overlay/", 8)) { snprintf(mapped, sizeof mapped, "themes/%s/%s", th, name + 8); name = mapped; }\n'
+      '    AAssetManager *am = dm_front_assets(); AAsset *a = am ? AAssetManager_open(am, name, AASSET_MODE_BUFFER) : NULL;')
 patch('android/overlay_layout.h', 'OVM_AUDIO, OVM_RESUME, OVM_TAB, OVM_N };', 'OVM_AUDIO, OVM_CHEAT0, OVM_CHEAT1, OVM_CHEAT2, OVM_CHEAT3, OVM_CHEAT4, OVM_RESUME, OVM_QUIT, OVM_TAB, OVM_N };')
 patch('android/gfx_vk_present.c', '"Audio output", "Resume", ""};', '"Audio output", "", "", "", "", "", "Resume", "Quit", ""};')
 patch('android/gfx_vk_present.c', 'cv_text(cv, r[0] + (rw - cv_text_w("Resume", is)) / 2, cy, "Resume", is, C_ACCENT); continue; }',
