@@ -188,7 +188,6 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         Triple("DM_VK_NO_ZEROCOPY=1", "Copy GPU memory", "The game's memory is normally shared with the GPU without copying. This copies it instead, which rules out the GPU reading what the game has not finished writing (parts floating or missing, flickering). Slower."),
         Triple("DM_VK_UBD_HEAP=0", "Read uniforms from scratch", "Deferred uniform updates keep no copy in ordinary memory and are read back from scratch. Try it when objects are placed or lit wrongly."),
         Triple("DM_OPMODE=0", "Handheld mode", "Runs the game as the Switch does in handheld mode: a smaller picture and less for the GPU to do. Helps speed on weaker phones."),
-        Triple("DM_CAM_ZONE=0.5", "Camera by touch (right half)", "Drag on the right half of the screen, away from any button, to turn the camera, like an Android game; the drawn right stick is hidden. 0.5 is where the zone starts (the middle of the screen). Already on for Pokémon Legends: Z-A; add DM_CAM_ZONE=0 to turn it off there."),
         Triple("DM_FPS_TARGET=0", "The game's own timing", "Turns off the frame-rate change from the community configs, so the game runs at the speed it was made for."),
     )
 
