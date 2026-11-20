@@ -21,10 +21,13 @@ object LogShare {
             val key = Regex("GPU |DM_VK_DRIVER|Vulkan [0-9]|driver|\\[RED\\]|not in the bundle|skipped \\(no|features|custom driver|memory pools in the last|longframe")
             val seen = LinkedHashSet<String>()
             val out = StringBuilder()
+            var lastSkips = ""
             for (l in f.readLines()) if (key.containsMatchIn(l)) {
+                if (l.contains("skipped (no program")) { lastSkips = l.take(300); continue }   // a counter: only its last value says anything
                 val k = l.replace(Regex("[0-9a-f]{16}"), "#").replace(Regex("[0-9.]+"), "0")
                 if (seen.size < 300 && seen.add(k)) out.append(l.take(300)).append('\n')
             }
+            if (lastSkips.isNotEmpty()) out.append("LAST COUNT: ").append(lastSkips).append('\n')
             sb.append("\n== key lines of the game's log (the GPU and driver, every red line, skipped draws; repeats left out) ==\n").append(out.toString().ifBlank { "(none: the game has not run since the app was installed)\n" })
         }
         for (f in listOf("rewrite.txt", "shaders.txt")) File(dir, f).takeIf { it.isFile }?.let { sb.append("\n== ").append(f).append(" ==\n").append(it.readText().trim()).append('\n') }
