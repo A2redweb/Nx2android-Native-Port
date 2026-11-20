@@ -109,26 +109,53 @@ patch('android/saves_android.c', 'snprintf(g_dir, sizeof g_dir, "%s/saves", file
 patch('android/gfx_vk_exec.c', 'static uint64_t until; static int done; const char *la = getenv("DM_VK_LIST_AT");',
       'static uint64_t until; static int done; static char lastla[32]; const char *la = getenv("DM_VK_LIST_AT"); if (la && strcmp(la, lastla)) { snprintf(lastla, sizeof lastla, "%s", la); done = 0; until = 0; }')
 # Camera by touch (DM_CAM_ZONE=<where the zone starts, as a fraction of the window's width, e.g. 0.5>; 0 or unset = off): a finger that goes down on no control in that part of the
-# window is the right stick, centred where it lands, and the drawn right stick is hidden. The app sets it for games that want it (Pokémon Legends: Z-A) and Extra settings can switch it.
+# window turns the camera by how fast it swipes (right stick deflection = the finger's speed, as an Android game's camera), and the drawn right stick is hidden; the camera stops
+# a moment after the finger does. DM_CAM_SENS (default 1; 0.3 to 3) scales the speed. The app sets these for games that want them (Pokémon Legends: Z-A).
 patch('android/front_android.c', 'static _Atomic uint64_t g_touch_btn;',
-      '''static int g_cam_id = -1; static float g_cam_ox, g_cam_oy;   // the camera finger (touch thread only)
+      """static int g_cam_id = -1; static float g_cam_px, g_cam_py;   // the camera finger and where it was (touch thread only)
+static _Atomic int g_cam_vx, g_cam_vy; static _Atomic long long g_cam_t; static _Atomic unsigned long long g_last_btn; static _Atomic int g_last_lx, g_last_ly;   // the camera's speed (1/10000), its last event, the rest of the last input
 static float cam_zone(void) { static float z = -1; if (z < 0) { const char *e = getenv("DM_CAM_ZONE"); z = e ? (float)atof(e) : 0; if (z < 0 || z >= 1) z = 0; } return z; }
-static _Atomic uint64_t g_touch_btn;''')
+static float cam_sens(void) { static float s = -1; if (s < 0) { const char *e = getenv("DM_CAM_SENS"); s = e ? (float)atof(e) : 1; if (s < 0.2f || s > 4) s = 1; } return s; }
+static _Atomic uint64_t g_touch_btn;""")
+patch('android/front_android.c', '// A system input device can report itself as an active controller',
+      """static void *cam_thread(void *u) {   // a swipe's speed fades once no event came for 24 ms (a finger held still sends none)
+    (void)u;
+    for (;;) {
+        usleep(8000); if (g_cam_id < 0) continue;
+        if (mono_ns() - atomic_load(&g_cam_t) < 24000000) continue;
+        int vx = atomic_load(&g_cam_vx), vy = atomic_load(&g_cam_vy); if (!vx && !vy) continue;
+        vx = vx * 7 / 10; vy = vy * 7 / 10; if (abs(vx) < 150) vx = 0; if (abs(vy) < 150) vy = 0;
+        atomic_store(&g_cam_vx, vx); atomic_store(&g_cam_vy, vy);
+        dm_input_set(atomic_load(&g_last_btn), atomic_load(&g_last_lx), atomic_load(&g_last_ly), (int32_t)((long long)vx * DM_STICK_MAX / 10000), (int32_t)(-(long long)vy * DM_STICK_MAX / 10000));
+    }
+    return NULL;
+}
+// A system input device can report itself as an active controller""")
 patch('android/front_android.c', 'int dm_overlay_off(int layout, int ctl) { return !atomic_load(&g_edit) && dm_overlay_hidden(layout, ctl); }',
       'int dm_overlay_off(int layout, int ctl) { return !atomic_load(&g_edit) && (dm_overlay_hidden(layout, ctl) || (cam_zone() > 0 && layout >= 0 && layout <= 1 && ctl >= 0 && ctl < OV_N && OV_LAYOUTS[layout][ctl].kind == OV_STICK_R)); }')
 patch('android/front_android.c', '        g_ptr_ctl[id] = c + 1;\n',
-      '''        g_ptr_ctl[id] = c + 1;
+      """        g_ptr_ctl[id] = c + 1;
         if (act == AMOTION_EVENT_ACTION_DOWN) g_cam_id = -1;   // (a first finger: none of an earlier touch is still down)
-        if (c < 0 && cam_zone() > 0 && g_cam_id < 0 && dm_overlay_visible() == 1 && AMotionEvent_getX(e, (size_t)i) >= W * cam_zone()) { g_cam_id = id; g_cam_ox = AMotionEvent_getX(e, (size_t)i); g_cam_oy = AMotionEvent_getY(e, (size_t)i); }
-''')
-patch('android/front_android.c', '            g_ptr_ctl[id] = 0; continue;',
-      '            if (id == g_cam_id) g_cam_id = -1;\n            g_ptr_ctl[id] = 0; continue;')
-patch('android/front_android.c', '        if (c < 0) { if (n < 16) { t[n].id',
-      '''        if (c < 0 && id == g_cam_id) {   // the camera finger: the right stick, as far from where it landed as it has moved (a stick's radius is 0.15 of the window's height)
-            float dx = (x - g_cam_ox) / (H * 0.15f), dy = (y - g_cam_oy) / (H * 0.15f), m = sqrtf(dx * dx + dy * dy); if (m > 1) { dx /= m; dy /= m; }
-            rx = (int32_t)(dx * DM_STICK_MAX); ry = (int32_t)(-dy * DM_STICK_MAX); continue;
+        if (c < 0 && cam_zone() > 0 && g_cam_id < 0 && dm_overlay_visible() == 1 && AMotionEvent_getX(e, (size_t)i) >= W * cam_zone()) {
+            static int started; if (!started) { started = 1; pthread_t th; if (!pthread_create(&th, NULL, cam_thread, NULL)) pthread_detach(th); }
+            g_cam_id = id; g_cam_px = AMotionEvent_getX(e, (size_t)i); g_cam_py = AMotionEvent_getY(e, (size_t)i); atomic_store(&g_cam_vx, 0); atomic_store(&g_cam_vy, 0);
         }
-        if (c < 0) { if (n < 16) { t[n].id''')
+""")
+patch('android/front_android.c', '            g_ptr_ctl[id] = 0; continue;',
+      '            if (id == g_cam_id) { g_cam_id = -1; atomic_store(&g_cam_vx, 0); atomic_store(&g_cam_vy, 0); }\n            g_ptr_ctl[id] = 0; continue;')
+patch('android/front_android.c', '        if (c < 0) { if (n < 16) { t[n].id',
+      """        if (c < 0 && id == g_cam_id) {   // the camera finger: the right stick follows its speed (1 height of the window per second is about 85% of the stick)
+            float ddx = x - g_cam_px, ddy = y - g_cam_py; g_cam_px = x; g_cam_py = y;
+            if (ddx != 0 || ddy != 0) {
+                float k = cam_sens() / (H * 0.0095f), vx = ddx * k, vy = ddy * k, m = sqrtf(vx * vx + vy * vy); if (m > 1) { vx /= m; vy /= m; }
+                atomic_store(&g_cam_vx, (int)(vx * 10000)); atomic_store(&g_cam_vy, (int)(vy * 10000)); atomic_store(&g_cam_t, (long long)mono_ns());
+            }
+            rx = (int32_t)((long long)atomic_load(&g_cam_vx) * DM_STICK_MAX / 10000); ry = (int32_t)(-(long long)atomic_load(&g_cam_vy) * DM_STICK_MAX / 10000); continue;
+        }
+        if (c < 0) { if (n < 16) { t[n].id""")
+patch('android/front_android.c', '    dm_input_set(btn, lx, ly, rx, ry);\n    dm_touch_set(t, n);',
+      '    atomic_store(&g_last_btn, btn); atomic_store(&g_last_lx, lx); atomic_store(&g_last_ly, ly);\n    dm_input_set(btn, lx, ly, rx, ry);\n    dm_touch_set(t, n);')
+
 # the gamepad's pack by game: DM_THEME names a folder of the app's assets (themes/<name>/theme.tsv and its atlases) in place of the APK's one assets/overlay
 patch('android/overlay_theme.c', '    AAssetManager *am = dm_front_assets(); AAsset *a = am ? AAssetManager_open(am, name, AASSET_MODE_BUFFER) : NULL;',
       '    char mapped[160]; const char *th = getenv("DM_THEME"); if (th && *th && !strncmp(name, "overlay/", 8)) { snprintf(mapped, sizeof mapped, "themes/%s/%s", th, name + 8); name = mapped; }\n'

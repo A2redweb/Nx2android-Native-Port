@@ -200,7 +200,11 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         box.addView(ui.sm("For finding what is wrong when a game draws badly: switch one on, play to the spot, and see whether it changes. They apply the next time the game starts."), ui.lp(bottom = 8))
         val et = ui.input("KEY=VALUE, one per line").apply { setSingleLine(false); minLines = 3; gravity = android.view.Gravity.TOP; setText(if (f.isFile) f.readText().trim() else "") }
         fun lines() = et.text.toString().lines().map { it.trim() }.filter { it.isNotEmpty() }
-        for ((line, title, what) in presets) {
+        val za = g.name.equals("0100F43008C44000", true)
+        val all = if (za) presets + listOf(
+            Triple("DM_CAM_SENS=1.6", "Faster camera", "How fast the right half of the screen turns the camera for a swipe of a given speed. 1 is the normal speed; try 1.6 for faster, or write DM_CAM_SENS=0.6 below for slower. Pokémon Legends: Z-A only."),
+            Triple("DM_CAM_ZONE=0", "Camera as a stick", "Turns the swipe camera off, back to the drawn right stick. Pokémon Legends: Z-A only.")) else presets
+        for ((line, title, what) in all) {
             box.addView(ui.check(title, line in lines()) { on ->
                 val cur = lines().filter { it != line }.toMutableList()
                 if (on) cur.add(line)
