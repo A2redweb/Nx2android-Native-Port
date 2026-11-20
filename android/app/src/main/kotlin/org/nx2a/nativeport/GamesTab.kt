@@ -157,23 +157,44 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         dlg.show()
     }
 
+    /** switches worth trying when a game draws wrongly: one A/B test each (the host's own names; what each does is the host's, gfx_vk_*.c) */
+    private val presets = listOf(
+        Triple("DM_VK_ASYNC_PIPE=0", "Build pipelines at once", "A new graphics pipeline is normally built in the background and its draws wait a frame or two. This builds each one the moment it is needed: no draw is held back, at the price of a short stall. Try it when geometry is missing for a moment."),
+        Triple("DM_VK_NO_ZEROCOPY=1", "Copy GPU memory", "The game's memory is normally shared with the GPU without copying. This copies it instead, which rules out the GPU reading what the game has not finished writing (parts floating or missing, flickering). Slower."),
+        Triple("DM_VK_UBD_HEAP=0", "Read uniforms from scratch", "Deferred uniform updates keep no copy in ordinary memory and are read back from scratch. Try it when objects are placed or lit wrongly."),
+        Triple("DM_OPMODE=0", "Handheld mode", "Runs the game as the Switch does in handheld mode: a smaller picture and less for the GPU to do. Helps speed on weaker phones."),
+        Triple("DM_FPS_TARGET=0", "The game's own timing", "Turns off the frame-rate change from the community configs, so the game runs at the speed it was made for."),
+    )
+
     private fun extraSettings(g: File, shown: String) {
         val f = File(g, "env_user.txt")
         val dlg = android.app.Dialog(a)
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val box = ui.column(16).apply { background = ui.shape(Theme.card, 14, Theme.line) }
-        box.addView(ui.text("Extra settings for $shown", 17f, Theme.fg, true), ui.lp(bottom = 8))
-        val et = ui.input("KEY=VALUE, one per line").apply { setSingleLine(false); minLines = 4; gravity = android.view.Gravity.TOP; setText(if (f.isFile) f.readText() else "") }
+        box.addView(ui.text("Extra settings for $shown", 17f, Theme.fg, true), ui.lp(bottom = 4))
+        box.addView(ui.sm("For finding what is wrong when a game draws badly: switch one on, play to the spot, and see whether it changes. They apply the next time the game starts."), ui.lp(bottom = 8))
+        val et = ui.input("KEY=VALUE, one per line").apply { setSingleLine(false); minLines = 3; gravity = android.view.Gravity.TOP; setText(if (f.isFile) f.readText().trim() else "") }
+        fun lines() = et.text.toString().lines().map { it.trim() }.filter { it.isNotEmpty() }
+        for ((line, title, what) in presets) {
+            box.addView(ui.check(title, line in lines()) { on ->
+                val cur = lines().filter { it != line }.toMutableList()
+                if (on) cur.add(line)
+                et.setText(cur.joinToString("\n"))
+            })
+            box.addView(ui.sm("$line: $what"), ui.lp(bottom = 6))
+        }
+        box.addView(ui.text("Your own lines", 13f, Theme.fg, true), ui.lp(top = 6, bottom = 4))
         box.addView(et)
         box.addView(ui.row(8, ui.button("Cancel") { dlg.dismiss() }, ui.button("Save", true) {
-            val t = et.text.toString().trim()
+            val t = lines().joinToString("\n")
             if (t.isEmpty()) f.delete() else f.writeText(t + "\n")
             dlg.dismiss()
-        }))
-        dlg.setContentView(box)
+        }), ui.lp(top = 10))
+        dlg.setContentView(ui.scroll(box))
         dlg.window?.apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
-            setLayout((a.resources.displayMetrics.widthPixels * 0.9f).toInt().coerceAtMost(ui.dp(460)), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            val m = a.resources.displayMetrics
+            setLayout((m.widthPixels * 0.92f).toInt().coerceAtMost(ui.dp(480)), (m.heightPixels * 0.88f).toInt())
             setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
         dlg.show()
