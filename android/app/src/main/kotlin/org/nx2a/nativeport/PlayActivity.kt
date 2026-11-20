@@ -39,6 +39,8 @@ class PlayActivity : GameActivity() {
         } catch (_: Exception) {}
         // the game's own control defaults (a line in Extra settings overrides them): Pokémon Legends: Z-A turns the camera by dragging on the right half of the screen
         if (id == "0100F43008C44000") { Os.setenv("DM_CAM_ZONE", "0.5", true); Os.setenv("DM_THEME", "pokemonza", true) }   // (its pad pack: the letters with their actions' icons)
+        // a build the game's profile does not register (the port wrote derived.txt): more alias region, as upstream's porter gives a derived profile; a DM_ALIAS_EXTRA_GB line below overrides it
+        try { File(root, "derived.txt").takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull()?.let { Os.setenv("DM_ALIAS_EXTRA_GB", it.toString(), true) } } catch (_: Exception) {}
         // settings the player (or whoever is helping) typed in the game's sheet: KEY=VALUE lines, applied last
         try {
             File(root, "env_user.txt").takeIf { it.isFile }?.readLines()?.forEach { l ->

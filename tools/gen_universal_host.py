@@ -133,6 +133,12 @@ patch('android/front_android.c', '        if (c < 0) { if (n < 16) { t[n].id',
 patch('android/overlay_theme.c', '    AAssetManager *am = dm_front_assets(); AAsset *a = am ? AAssetManager_open(am, name, AASSET_MODE_BUFFER) : NULL;',
       '    char mapped[160]; const char *th = getenv("DM_THEME"); if (th && *th && !strncmp(name, "overlay/", 8)) { snprintf(mapped, sizeof mapped, "themes/%s/%s", th, name + 8); name = mapped; }\n'
       '    AAssetManager *am = dm_front_assets(); AAsset *a = am ? AAssetManager_open(am, name, AASSET_MODE_BUFFER) : NULL;')
+# alias-region headroom for a build the profile was not made on: DM_ALIAS_EXTRA_GB (the app sets it for such a build; upstream's porter does the same with 8 GB, porter/pipeline.py alias_headroom)
+# grows the alias region and the block with it, for a game whose profile declares virtual address memory (a sys_resource row); the heap stays as it is
+patch('host/hle_svc.c', '#define RESERVE DM_GAME_MEM_RESERVE',
+      'static size_t dm_extra(void) { static size_t x = (size_t)-1; if (x == (size_t)-1) { const char *e = getenv("DM_ALIAS_EXTRA_GB"); long g = e ? atol(e) : 0; x = DM_GAME_SYS_RESOURCE && g > 0 && g <= 48 ? (size_t)g << 30 : 0; } return x; }\n'
+      '#define RESERVE (DM_GAME_MEM_RESERVE + dm_extra())')
+patch('host/hle_svc.c', 'g_alias_cap = DM_GAME_MEM_ALIAS;', 'g_alias_cap = DM_GAME_MEM_ALIAS + dm_extra(); if (dm_extra()) LOG("[mem] alias region %llu GB larger than the profile\'s (DM_ALIAS_EXTRA_GB)", (unsigned long long)(dm_extra() >> 30));')
 patch('android/overlay_layout.h', 'OVM_AUDIO, OVM_RESUME, OVM_TAB, OVM_N };', 'OVM_AUDIO, OVM_CHEAT0, OVM_CHEAT1, OVM_CHEAT2, OVM_CHEAT3, OVM_CHEAT4, OVM_RESUME, OVM_QUIT, OVM_TAB, OVM_N };')
 patch('android/gfx_vk_present.c', '"Audio output", "Resume", ""};', '"Audio output", "", "", "", "", "", "Resume", "Quit", ""};')
 patch('android/gfx_vk_present.c', 'cv_text(cv, r[0] + (rw - cv_text_w("Resume", is)) / 2, cy, "Resume", is, C_ACCENT); continue; }',

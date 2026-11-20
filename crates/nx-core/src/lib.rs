@@ -77,6 +77,7 @@ pub fn rewrite_modules(profiles: &Path, cuts_tsv: &str, framestep_tsv: &str, id:
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let mut summary = vec![];
+    let mut derived = false; // a build the profile does not register: the app gives the game more alias region (DM_ALIAS_EXTRA_GB), as upstream's porter does for a derived profile
     // the builds this profile registers: `build <version> <display> module=id …`
     let registered: Vec<(String, Vec<(String, String)>)> = g
         .values("build")
@@ -97,6 +98,7 @@ pub fn rewrite_modules(profiles: &Path, cuts_tsv: &str, framestep_tsv: &str, id:
             let id_hex = nso.build_id_hex().to_lowercase();
             let known = |b: &str| registered.iter().any(|(_, mods)| mods.iter().any(|(n, v)| n == m && b.starts_with(&v[..v.len().min(b.len())]) ));
             if !known(&id_hex) {
+                derived = true;
                 let vers: Vec<&str> = registered.iter().map(|(v, _)| v.as_str()).collect();
                 summary.push(format!("[RED] {m}: build {} is not one this game's profile registers (versions {}); the game's patches do not apply to it and it will most likely not run: use the base game and update the profile was tested on", &id_hex[..16.min(id_hex.len())], vers.join(", ")));
             }
@@ -112,6 +114,8 @@ pub fn rewrite_modules(profiles: &Path, cuts_tsv: &str, framestep_tsv: &str, id:
         let _ = std::fs::remove_dir_all(&tmp);
         return Err(format!("{id}: none of the modules {} is in ExeFS", modules.join(" ")));
     }
+    let marker = game_dir.join("derived.txt");
+    if derived { let _ = std::fs::write(&marker, "8\n"); } else { let _ = std::fs::remove_file(&marker); }
     let mods = game_dir.join("mods");
     let _ = std::fs::remove_dir_all(&mods);
     std::fs::rename(&tmp, &mods).map_err(|e| e.to_string())?;
