@@ -53,6 +53,10 @@ cargo run -p nxn -- verify prod.keys game.nsp        # hash trees: finds damaged
 
 Tap a game's icon in Games, then "Get cheats": the community's cheats for your exact build of the game (HamletDuFromage/switch-cheats-db) are downloaded and listed with an on/off switch each. The game's host runs the switched-on ones with a virtual machine that follows Atmosphère's cheat VM (`tools/dm_cheats.c`; opcodes 0-A, C0 and C1 work; key-press conditions, C2/C3 and other regions than main and heap do not, and a cheat that uses one stops with a line in the game's log). The pause menu has a Cheats tab with the same switches. Cheat addresses belong to one build of a game: a cheat for another version is not offered.
 
+## Frame trace
+
+When a game draws something wrong, press **Volume down** while it is on screen. The host (upstream's `DM_VK_LIST_AT`, now re-armable) lists every pass of the next two presents: targets, draws, shaders by key, barriers. That part of the log is kept as `trace_N.txt` and goes into the game's **Log link**, so what the GPU was told to draw can be compared with what is seen.
+
 ## Docs
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md): the plan

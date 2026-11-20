@@ -105,6 +105,9 @@ patch('android/saves_android.c', 'snprintf(g_dir, sizeof g_dir, "%s/saves", file
       '    for (char *q = g_dir + 1; *q; q++) if (*q == \'/\') { *q = 0; mkdir(g_dir, 0770); *q = \'/\'; }\n'
       '    mkdir(g_dir, 0770);')
 # the pause menu's Quit: the Resume row is split, Resume on the left and Quit on the right (a touch on the right half ends the game)
+# DM_VK_LIST_AT re-armable: the app sets a changed value (the same present number with a different tail) to trace another frame while the game runs (the pass list stays upstream's)
+patch('android/gfx_vk_exec.c', 'static uint64_t until; static int done; const char *la = getenv("DM_VK_LIST_AT");',
+      'static uint64_t until; static int done; static char lastla[32]; const char *la = getenv("DM_VK_LIST_AT"); if (la && strcmp(la, lastla)) { snprintf(lastla, sizeof lastla, "%s", la); done = 0; until = 0; }')
 patch('android/overlay_layout.h', 'OVM_AUDIO, OVM_RESUME, OVM_TAB, OVM_N };', 'OVM_AUDIO, OVM_CHEAT0, OVM_CHEAT1, OVM_CHEAT2, OVM_CHEAT3, OVM_CHEAT4, OVM_RESUME, OVM_QUIT, OVM_TAB, OVM_N };')
 patch('android/gfx_vk_present.c', '"Audio output", "Resume", ""};', '"Audio output", "", "", "", "", "", "Resume", "Quit", ""};')
 patch('android/gfx_vk_present.c', 'cv_text(cv, r[0] + (rw - cv_text_w("Resume", is)) / 2, cy, "Resume", is, C_ACCENT); continue; }',

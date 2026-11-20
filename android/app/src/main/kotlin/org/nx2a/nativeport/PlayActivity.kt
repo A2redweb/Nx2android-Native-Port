@@ -12,6 +12,7 @@ import java.io.File
 class PlayActivity : GameActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val id = intent.getStringExtra(EXTRA_GAME) ?: error("no game")
+        gameId = id
         val root = File(filesDir, "data/$id")
         File(root, "save").mkdirs()
         File(root, "temp").mkdirs()
@@ -73,6 +74,50 @@ class PlayActivity : GameActivity() {
     }
 
     override fun onDestroy() { live = false; super.onDestroy() }
+
+    private var traceN = 0
+    private var traceBusy = false
+    private var gameId = ""
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) { if (event.repeatCount == 0) traceFrame(); return true }   // volume down = "trace what is on screen now"
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent): Boolean =
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) true else super.onKeyUp(keyCode, event)
+
+    /**
+     * Frame trace: asks the host (DM_VK_LIST_AT, read again at every submission) for the pass and draw list of the next two presents (every pass: its targets, draws, shaders
+     * by key, barriers), waits for them to reach log.txt and keeps that part as trace_N.txt. The Log link carries the latest. Used when a game draws something wrong: take
+     * it with the wrong thing on screen, and what the GPU was told to draw can be compared with what is seen.
+     */
+    private fun traceFrame() {
+        val id = gameId.ifEmpty { intent.getStringExtra(EXTRA_GAME) ?: return }
+        if (traceBusy) return
+        traceBusy = true
+        val root = File(filesDir, "data/$id")
+        val logf = File(root, "log.txt")
+        val from = if (logf.isFile) logf.length() else 0L
+        val n = ++traceN
+        runOnUiThread { android.widget.Toast.makeText(this, "Tracing the next frames…", android.widget.Toast.LENGTH_SHORT).show() }
+        Os.setenv("DM_VK_LIST_AT", "0" + " ".repeat(n), true)
+        Thread {
+            try {
+                Thread.sleep(4000)
+                val raf = java.io.RandomAccessFile(logf, "r")
+                val txt = try { raf.seek(from.coerceAtMost(raf.length())); val b = ByteArray((raf.length() - raf.filePointer).coerceAtMost(6_000_000).toInt()); raf.readFully(b); String(b) } finally { raf.close() }
+                val i = txt.indexOf("--- submission at present")
+                val msg = if (i < 0) "no trace reached the log (the game was not drawing?)" else {
+                    val t = txt.substring(i)
+                    File(root, "trace_$n.txt").writeText("frame trace $n, ${t.lines().size} lines\n" + t.take(2_000_000))
+                    File(root, "trace_latest.txt").writeText(File(root, "trace_$n.txt").readText())
+                    "Frame trace saved (${t.lines().size} lines). Add it with Log link in the game's sheet."
+                }
+                runOnUiThread { android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show() }
+            } catch (_: Throwable) {} finally { traceBusy = false }
+        }.also { it.isDaemon = true }.start()
+    }
 
     companion object { const val EXTRA_GAME = "game" }
 }

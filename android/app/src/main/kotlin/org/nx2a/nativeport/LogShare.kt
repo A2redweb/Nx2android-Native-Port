@@ -8,6 +8,7 @@ import java.net.URL
 /** A game's log as a link: the port's log and the game's own output, uploaded to a public paste site so anyone with the link can read it. */
 object LogShare {
     private const val MAX = 400_000
+    private val fmt0 = java.text.SimpleDateFormat("d MMM HH:mm:ss", java.util.Locale.US)
 
     fun gameLog(dir: File, shown: String, ext: File?): String {
         val sb = StringBuilder()
@@ -32,6 +33,10 @@ object LogShare {
         }
         for (f in listOf("rewrite.txt", "shaders.txt")) File(dir, f).takeIf { it.isFile }?.let { sb.append("\n== ").append(f).append(" ==\n").append(it.readText().trim()).append('\n') }
         File(dir, "port.log").takeIf { it.isFile }?.let { sb.append("\n== port log ==\n").append(it.readText().trim()).append('\n') }
+        File(dir, "trace_latest.txt").takeIf { it.isFile }?.let {   // taken with Volume down while playing: every pass and draw the GPU was given for two frames
+            val t = it.readText()
+            sb.append("\n== frame trace (taken in game with Volume down; ").append(fmt0.format(java.util.Date(it.lastModified()))).append(") ==\n").append(if (t.length > 80_000) t.take(80_000) + "\n…cut…\n" else t).append('\n')
+        }
         val fmt = java.text.SimpleDateFormat("d MMM HH:mm:ss", java.util.Locale.US)
         for (f in listOf("log.txt", "log.prev.txt")) File(dir, f).takeIf { it.isFile }?.let {   // the host's own log: the last two runs of any game
             sb.append("\n== game output: ").append(f).append(" (written ").append(fmt.format(java.util.Date(it.lastModified()))).append(") ==\n").append(it.readText().trim().takeLast(120_000)).append('\n')
