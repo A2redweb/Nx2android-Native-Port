@@ -7,7 +7,7 @@
 use crate::container::{u32le, u64le};
 use crate::pack::{Decoder, HostSpec, Outcome};
 use crate::scan::Appender;
-use crate::split::{scan_blob, Found};
+use crate::split::{check, scan_blob, Found, Stage};
 use nx_crypto::Aes256;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -366,6 +366,24 @@ fn shader_bytes(b: &[u8], a: &Archive, i: usize, dec: &mut LazyDec) -> Result<Ve
     dec.decode(c, raw as usize)
 }
 
+/// A decoded Switch shader (LSLG): 'LSLG', a stage tag (SV vertex, SP pixel, SC compute, ...), a header with the source name, u32 code length, the code area, u32 control length and
+/// the control section (0x880 bytes), then a short tail. → (tag, control section, code area), or None when the layout differs (upstream's `uepak.lslg`)
+pub fn lslg(s: &[u8]) -> Option<(String, Vec<u8>, Vec<u8>)> {
+    if s.get(..4)? != b"LSLG" {
+        return None;
+    }
+    let k = s.windows(4).position(|w| w == [0x34, 0x12, 0x76, 0x98])?;
+    if k < 8 {
+        return None;
+    }
+    let (nctl, ncode) = (u32le(s, k - 4).ok()? as usize, u32le(s, k + 0x704).ok()? as usize);
+    let c = (k - 4).checked_sub(ncode)?;
+    if c < 4 || u32le(s, c - 4).ok()? as usize != ncode || k.checked_add(nctl)? > s.len() {
+        return None;
+    }
+    Some((String::from_utf8_lossy(&s[4..6]).into_owned(), s[k..k + nctl].to_vec(), s[c..c + ncode].to_vec()))
+}
+
 // ---------------------------------------------------------------- IoStore
 pub struct Toc {
     path: PathBuf,
@@ -624,7 +642,7 @@ fn par_scan(total: usize, threads: usize, host: &HostSpec, label: &str, work: Wo
 }
 
 /// what the records looked like (total, starting LSLG, holding the GLSLC magic, a few first bytes), for a scan that finds nothing
-static DIAG: std::sync::Mutex<(usize, usize, usize, Vec<String>)> = std::sync::Mutex::new((0, 0, 0, Vec::new()));
+static DIAG: std::sync::Mutex<(usize, usize, usize, Vec<String>, usize, Vec<String>)> = std::sync::Mutex::new((0, 0, 0, Vec::new(), 0, Vec::new()));
 
 fn scan_record(d: &[u8], label: String) -> Vec<Found> {
     if let Ok(mut g) = DIAG.lock() {
@@ -641,6 +659,29 @@ fn scan_record(d: &[u8], label: String) -> Vec<Found> {
         }
     }
     let mut found = vec![];
+    // an LSLG record is one Switch shader stage: 'LSLG', the stage tag, a header, the code area, the control section (UE 4.27 Hogwarts Legacy, Octopath Traveler 0)
+    if let Some((tag, ctl, code)) = lslg(d) {
+        let st = match &tag[..] {
+            "SV" => Some(Stage::Vs),
+            "SH" => Some(Stage::Hs),
+            "SD" => Some(Stage::Ds),
+            "SG" => Some(Stage::Gs),
+            "SP" => Some(Stage::Ps),
+            "SC" => Some(Stage::Cs),
+            _ => None,
+        };
+        let why = st.and_then(|st| check(st, &ctl, &code)).or(if st.is_none() { Some("unknown stage tag") } else { None });
+        if let Ok(mut g) = DIAG.lock() {
+            if why.is_none() {
+                g.4 += 1;
+            } else if g.5.len() < 3 {
+                g.5.push(format!("{tag}: {}", why.unwrap_or("")));
+            }
+        }
+        if why.is_none() {
+            return vec![Found { label: format!("{label}#UE"), stage: st.unwrap(), ctl, code }];
+        }
+    }
     if scan_blob(d, &label, &mut found).is_err() {
         found.clear();
     }
@@ -690,7 +731,7 @@ pub fn scan_unreal(romfs: &Path, main: &Path, host: &HostSpec, threads: usize, a
     let _ = std::fs::create_dir_all(&host.log_dir);
     let (paks, tocs) = unreal_files(romfs);
     if let Ok(mut g) = DIAG.lock() {
-        *g = (0, 0, 0, vec![]);
+        *g = (0, 0, 0, vec![], 0, vec![]);
     }
     let mut img: Option<(Vec<u8>, usize)> = None;
     let mut key_for = |block: &[u8; 16]| -> Result<Aes256, String> {
@@ -749,7 +790,7 @@ pub fn scan_unreal(romfs: &Path, main: &Path, host: &HostSpec, threads: usize, a
     }
     if let Ok(g) = DIAG.lock() {
         if g.0 > 0 {
-            out.notes.insert(0, format!("Unreal shader records: {} read, {} start LSLG, {} hold the GLSLC magic; first bytes: {}", g.0, g.1, g.2, g.3.join(" | ")));
+            out.notes.insert(0, format!("Unreal shader records: {} read, {} start LSLG, {} usable stages{}{}; {} hold the GLSLC magic; first bytes: {}", g.0, g.1, g.4, if g.5.is_empty() { "" } else { ", refused: " }, g.5.join(" | "), g.2, g.3.join(" | ")));
         }
     }
     Ok(out)
@@ -757,6 +798,26 @@ pub fn scan_unreal(romfs: &Path, main: &Path, host: &HostSpec, threads: usize, a
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_lslg_record_is_split_into_code_and_control() {
+        let (ncode, nctl) = (0x40usize, 0x880usize);
+        let mut r = b"LSLGSP".to_vec();
+        r.extend([0u8; 10]); // header
+        r.extend((ncode as u32).to_le_bytes());
+        r.extend(vec![0xAB; ncode]);
+        r.extend((nctl as u32).to_le_bytes());
+        let k = r.len();
+        let mut ctl = vec![0u8; nctl];
+        ctl[..4].copy_from_slice(&[0x34, 0x12, 0x76, 0x98]);
+        ctl[0x704..0x708].copy_from_slice(&(ncode as u32).to_le_bytes());
+        r.extend(&ctl);
+        r.extend([0u8; 24]);
+        let (tag, c, code) = lslg(&r).unwrap();
+        assert_eq!((tag.as_str(), c.len(), code.len(), c == ctl, k), ("SP", nctl, ncode, true, k));
+        assert!(code.iter().all(|&b| b == 0xAB));
+        assert!(lslg(b"LSLGSP").is_none());
+    }
     use super::*;
 
     #[test]
