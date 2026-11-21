@@ -228,6 +228,25 @@ pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<Stri
             None => pack_note = "; [RED] the game's archives are Oodle-compressed and this build has no decoder (libdmhost_exe.so)".into(),
         }
     }
+    // Unreal Engine games: shader code archives in paks (LZ4 or Oodle) and IoStore shader libraries (Oodle); the AES key for an encrypted pak index is looked for in main
+    let romfs = game_dir.join("RomFS");
+    let (upaks, utocs) = nx_shader::unreal::unreal_files(&romfs);
+    if !upaks.is_empty() || !utocs.is_empty() {
+        let exe = std::path::Path::new(xlate.first().map(String::as_str).unwrap_or("")).parent().map(|p| p.join("libdmhost_exe.so")).unwrap_or_default();
+        let h = nx_shader::pack::HostSpec { exe, mods: game_dir.join("mods"), cwd: game_dir.to_path_buf(), game: id.to_string(), log_dir: game_dir.join("decoder-logs") };
+        let mut ap = index.appender()?;
+        let r = nx_shader::unreal::scan_unreal(&romfs, &game_dir.join("ExeFS").join("main"), &h, threads.min(3), &mut ap, progress);
+        let added = ap.finish()?;
+        match r {
+            Ok(o) => {
+                pack_note.push_str(&format!(", {added} from Unreal Engine archives ({} shaders read{})", o.members, if o.failed > 0 { format!(", {} did not decode", o.failed) } else { String::new() }));
+                if !o.notes.is_empty() {
+                    pack_note.push_str(&format!("; [RED] {}", o.notes.join("; ")));
+                }
+            }
+            Err(e) => pack_note.push_str(&format!(", {added} from Unreal Engine archives; [RED] {e} (see decoder-logs)")),
+        }
+    }
     let params = nx_shader::pipeline::Params {
         xlate,
         work: work.join("xlate"),

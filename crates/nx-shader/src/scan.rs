@@ -118,8 +118,8 @@ pub fn scan_dir(roots: &[(PathBuf, String)], common: Option<HashMap<u32, String>
         walk(root, &mut v).map_err(|e| format!("{}: {e}", root.display()))?;
         for p in v {
             let rel = p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
-            if rel.ends_with(".trpfs") {
-                continue; // Trinity packs are read member by member (pack.rs), not as one file
+            if rel.ends_with(".trpfs") || rel.ends_with(".pak") || rel.ends_with(".ucas") || rel.ends_with(".utoc") {
+                continue; // Trinity packs and Unreal paks / IoStore are read member by member (pack.rs, unreal.rs), not as one file
             }
             files.push((p, format!("{prefix}/{rel}")));
         }
