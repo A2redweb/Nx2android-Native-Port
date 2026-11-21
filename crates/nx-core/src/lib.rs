@@ -261,7 +261,12 @@ pub fn build_shaders(profiles: &Path, id: &str, game_dir: &Path, xlate: Vec<Stri
         handles,
     };
     let out = game_dir.join("shaders.dmsv");
-    let rep = nx_shader::pipeline::build(&index, &params, &out, progress)?;
+    let rep = nx_shader::pipeline::build(&index, &params, &out, progress).map_err(|e| {
+        // what the archive scans found or stopped on is the reason when nothing was selected: say it
+        let (n, files) = (index.len(), skipped.len());
+        let note = pack_note.trim_start_matches([',', ';', ' ']);
+        format!("{e} (index holds {n} shaders; {files} unreadable files{}{})", if note.is_empty() { "" } else { "; " }, note)
+    })?;
     let _ = std::fs::remove_dir_all(&work);
     if !rep.failed.is_empty() {
         let first: Vec<String> = rep.failed.iter().take(3).map(|(k, e)| format!("{k:016x}: {e}")).collect();

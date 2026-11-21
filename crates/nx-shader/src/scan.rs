@@ -25,6 +25,10 @@ pub struct Index {
 }
 
 impl Index {
+    pub fn len(&self) -> usize {
+        self.ents.len()
+    }
+
     /// Adds the shaders the game captured while it ran (`<dir>/<key>.bin`: "DMSC", u32 control length, u32 code length, control, code; gfx_vk_shader.c vk_shader_missing) that the index
     /// does not hold. Returns how many were added and a line for each file that was left out and why.
     pub fn add_captures(&mut self, dir: &Path) -> Result<(usize, Vec<String>), String> {

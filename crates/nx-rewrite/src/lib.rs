@@ -3,7 +3,7 @@
 //!
 //! Frame step stubs of the builds that have them are replayed from `framestep.tsv` (`framestep.rs`). Observation gates are diagnostics only and are left out.
 //! The FAR layout (a module whose patch area would start beyond 112 MB) puts the patch area before the base.
-//! Not done yet (each by an error where it would matter): spin-wait copies (a speed matter), and functions longer than `BIG_FN` without unwind entries.
+//! Not done yet (each by an error where it would matter): spin-wait copies (a speed matter). Functions longer than `BIG_FN` without unwind entries are analysed in pieces.
 
 pub mod analysis;
 pub mod asm;
@@ -41,6 +41,71 @@ pub struct Output {
 }
 
 const BIG_FN: i64 = 0x40000;
+/// a function longer than BIG_FN without unwind entries is analysed in pieces of about PIECE bytes, cut only right after an unconditional ret / br / b where no conditional branch and
+/// no near b crosses (PIECE_B); farther b / bl that cross a cut are checked at the end (none may land inside a window or a retry block)
+const PIECE: i64 = 0x40000;
+const PIECE_B: i64 = 0x10000;
+
+/// [(start, end)] covering [fa, fb), and the far b / bl in it as [(site, target)] (upstream's patch_nso.py `pieces`)
+fn pieces(img: &[u8], fa: i64, fb: i64) -> (Vec<(i64, i64)>, Vec<(i64, i64)>) {
+    let n = ((fb - fa) / 4) as usize;
+    let w: Vec<u32> = (0..n).map(|i| rd32(img, fa + 4 * i as i64)).collect();
+    let mut cross = vec![0i32; n + 2];
+    let mut far = vec![];
+    for i in 0..n {
+        let x = w[i];
+        let t = x >> 24;
+        let d: i64 = if (t == 0x54 && x & 0x10 == 0) || t & 0x7E == 0x34 {
+            let d = ((x >> 5) & 0x7FFFF) as i64;
+            d - ((d & 0x40000) << 1)
+        } else if t & 0x7E == 0x36 {
+            let d = ((x >> 5) & 0x3FFF) as i64;
+            d - ((d & 0x2000) << 1)
+        } else if t & 0x7C == 0x14 {
+            let d = (x & 0x3FF_FFFF) as i64;
+            let d = d - ((d & 0x200_0000) << 1);
+            if t & 0x80 != 0 || 4 * d.abs() > PIECE_B {
+                far.push((fa + 4 * i as i64, fa + 4 * (i as i64 + d)));
+                continue;
+            }
+            d
+        } else {
+            continue;
+        };
+        let i = i as i64;
+        let lo = i.min(i + d).max(-1);
+        let hi = i.max(i + d).min(n as i64);
+        cross[(lo + 1) as usize] += 1;
+        cross[(hi + 1) as usize] -= 1;
+    }
+    let mut cand: Vec<usize> = vec![];
+    let mut c = 0i32;
+    for k in 0..n {
+        c += cross[k];
+        let x = if k > 0 { w[k - 1] } else { 0 };
+        if k > 0 && c == 0 && (matches!(x & 0xFFFF_FC1F, 0xD65F_0000 | 0xD61F_0000) || x >> 26 == 0x05) {
+            cand.push(k);
+        }
+    }
+    let step = (PIECE / 4) as usize;
+    let (mut cuts, mut s) = (vec![], 0usize);
+    while s + step < n {
+        let hi = cand.partition_point(|&c| c <= s + step);
+        let mut j = hi as isize - 1;
+        if j < 0 || cand[j as usize] <= s {
+            j = hi as isize;
+        }
+        if j as usize >= cand.len() {
+            break;
+        }
+        s = cand[j as usize];
+        cuts.push(s);
+    }
+    let mut b = vec![0usize];
+    b.extend(cuts);
+    b.push(n);
+    (b.windows(2).map(|p| (fa + 4 * p[0] as i64, fa + 4 * p[1] as i64)).collect(), far)
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum K {
@@ -182,9 +247,24 @@ fn rewrite_inner(nso_bytes: &[u8], cuts: &[Cut], steps: &[framestep::Op], front_
         }
     };
     let funcs: BTreeSet<(i64, i64)> = kinds.iter().filter(|(_, v)| v.0 == K::X18).map(|(&a, _)| func_of(a)).collect();
-    if let Some(&(fa, fb)) = funcs.iter().find(|f| f.1 - f.0 > BIG_FN) {
-        return Err(format!("function {fa:#x}..{fb:#x} is longer than {BIG_FN:#x} bytes without unwind entries: piecewise analysis is not implemented yet"));
-    }
+    let mut far_into: Vec<(i64, i64)> = vec![];
+    let funcs: Vec<(i64, i64)> = if funcs.iter().any(|f| f.1 - f.0 > BIG_FN) {
+        let sites18: Vec<i64> = kinds.iter().filter(|(_, v)| v.0 == K::X18).map(|(&a, _)| a).collect();
+        let mut split = vec![];
+        for &(fa, fb) in &funcs {
+            if fb - fa <= BIG_FN {
+                split.push((fa, fb));
+                continue;
+            }
+            let (ps, far) = pieces(&img, fa, fb);
+            far_into.extend(far);
+            split.extend(ps.into_iter().filter(|&(p, q)| sites18.partition_point(|&a| a < p) < sites18.partition_point(|&a| a < q)));
+        }
+        split
+    } else {
+        funcs.into_iter().collect()
+    };
+    let mut rmid_all: BTreeSet<i64> = BTreeSet::new();
 
     let mut done: BTreeSet<i64> = BTreeSet::new();
     let mut windows: Vec<Vec<I>> = vec![];
@@ -246,6 +326,21 @@ fn rewrite_inner(nso_bytes: &[u8], cuts: &[Cut], steps: &[framestep::Op], front_
         for (a, tgt) in &tabjumps {
             if (fa..fb).contains(a) && tgt.iter().any(|t| inwin.contains(t) && !heads.contains(t)) {
                 return Err(format!("jump table target into window {a:#x}"));
+            }
+        }
+        rmid_all.extend(rmid);
+    }
+    if !far_into.is_empty() {
+        // functions analysed in pieces: their far b / bl, and every jump table's targets (a cut may follow a br x18), may not land inside a window or a retry block
+        let win_mid: BTreeSet<i64> = windows.iter().flat_map(|w| w.iter().skip(1).map(|x| x.a)).collect();
+        for &(at, to) in &far_into {
+            if win_mid.contains(&to) || rmid_all.contains(&to) {
+                return Err(format!("far branch into a window or retry block {at:#x}"));
+            }
+        }
+        for (at, tgt) in &tabjumps {
+            if tgt.iter().any(|t| win_mid.contains(t) || rmid_all.contains(t)) {
+                return Err(format!("jump table target into a window or retry block {at:#x}"));
             }
         }
     }
@@ -447,6 +542,27 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_long_function_is_cut_after_a_ret_where_nothing_crosses() {
+        // 1 MB of nops with a ret every 0x1000 bytes, and a conditional branch over the ret at 0x41000 (it crosses the cut after that ret's neighbours)
+        let n = 0x100000 / 4;
+        let mut img = vec![0u8; 0x100000];
+        for i in 0..n {
+            let w: u32 = if i % 0x400 == 0x3ff { 0xD65F03C0 } else { 0xD503201F };
+            img[4 * i..4 * i + 4].copy_from_slice(&w.to_le_bytes());
+        }
+        let (ps, far) = pieces(&img, 0, 0x100000);
+        assert!(far.is_empty());
+        assert_eq!(ps.first().unwrap().0, 0);
+        assert_eq!(ps.last().unwrap().1, 0x100000);
+        assert!(ps.len() >= 4 && ps.windows(2).all(|p| p[0].1 == p[1].0));
+        assert!(ps.iter().all(|p| p.1 - p.0 <= PIECE + 0x1000));
+        // a far bl is reported, not followed
+        let mut img2 = img.clone();
+        img2[0x20..0x24].copy_from_slice(&0x9400_8000u32.to_le_bytes());
+        assert_eq!(pieces(&img2, 0, 0x100000).1.len(), 1);
+    }
     use super::*;
     use crate::testing::fake_nso;
 
