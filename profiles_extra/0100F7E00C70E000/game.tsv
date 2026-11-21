@@ -1,7 +1,7 @@
 # Hogwarts Legacy (Avalanche Software / Warner Bros.): Unreal Engine 4.27 (Phoenix project), NVN, SDK 17.5.4, update 1.0.5; version 11 paks (index not encrypted) with IoStore containers
 # beside them; shader code archives (SF_GLSL_SWITCH) in pakchunk0 (Phoenix_Chunk0 and Global), pakchunk9 and pakchunk10; Oodle in the paks; Wwise sound; Bink video.
 # Made by hand from the app's survey of the dump (main.npdm: 64-bit, system resource 0x1000000 = virtual address memory), not by upstream: upstream has no profile for this game.
-# The memory split is the one of the other Unreal Engine 4.27 profiles (Dragon Quest VII Reimagined) with this game's own system resource; no per-build engine rows yet
+# The memory split is a 64 GB alias region (see Graphics / memory) with this game's own system resource; no per-build engine rows yet
 # (ue_malloc.tsv / fps_locks.tsv need main analysed), so it starts on the engine's own allocator and its own frame limit. Untested: the first run decides what to change.
 
 # ---- Identity ----
@@ -25,8 +25,13 @@ zip_store	.pak:.ucas:.utoc:.bk2:.ttf
 
 # ---- Graphics / memory ----
 fps_target	0
-mem_reserve	0xF0000000
-mem_alias	0xC8000000
+# nninitStartup reserves one 62 GB address region for the engine (AllocateAddressRegion +0xf80000000, the first thing the first run did; the 3.12 GB alias region refused it, result 0x1803, and
+# the SDK aborted at sdk+0x137d14). The Switch's alias region is 64 GB: the same 64 GB alias region as upstream's Unreal bring-up (dm/games/profile_guess.py: reserve 0x1028000000,
+# alias 0x1008000000), plus the 128 MB heap region the other Unreal profiles keep (the C library's malloc heap). On Android this is address space only (PROT_NONE, MAP_NORESERVE): the engine maps
+# into it on demand, bounded by app_pool. Dragon Quest VII instead caps the region (game_args -SwitchVirtualAddressSpaceSize) and cuts its FMallocBinned3 per build (ue_malloc.tsv),
+# which needs this game's main analysed; this does not
+mem_reserve	0x1030000000
+mem_alias	0x1008000000
 mem_stack	0x10000000
 app_pool	0xCD500000
 sys_resource	0x1000000

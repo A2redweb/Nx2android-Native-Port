@@ -39,7 +39,17 @@ object Catalog {
         prefs.edit().putInt("profiles_for", ver).putString("profiles_commit", commit).apply()
     }
 
-    fun size(f: File): Long = if (f.isFile) f.length() else f.listFiles()?.sumOf { size(it) } ?: 0L
+    /** Bytes under [f]. An iterative walk, and slow on a game with tens of thousands of files (a ported game's shaders): call it off the main thread only. */
+    fun size(f: File): Long {
+        if (f.isFile) return f.length()
+        var total = 0L
+        val todo = arrayListOf(f)
+        while (todo.isNotEmpty()) {
+            val kids = todo.removeAt(todo.size - 1).listFiles() ?: continue
+            for (k in kids) if (k.isDirectory) todo.add(k) else total += k.length()
+        }
+        return total
+    }
 
     fun human(n: Long): String = when {
         n >= 1_000_000_000 -> "%.1f GB".format(n / 1e9)
