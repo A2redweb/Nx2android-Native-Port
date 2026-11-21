@@ -20,5 +20,14 @@ for d in "$src"/nxnative/dm/games/*/; do
     [ -f "$d$f" ] && cp "$d$f" "$dst/$id/$f"
   done
 done
+# games upstream has no profile for (profiles_extra/): the same files
+for d in "$here"/profiles_extra/*/; do
+  [ -f "${d}game.tsv" ] || continue
+  id=$(basename "$d")
+  mkdir -p "$dst/$id"
+  for f in game.tsv android.tsv shader_facts.tsv android_shader_handles.tsv; do
+    [ -f "$d$f" ] && cp "$d$f" "$dst/$id/$f"
+  done
+done
 python3 "$here/tools/gen_cuts.py" "$src" "$dst"
 echo "profiles: $(ls "$dst" | wc -l) games copied to $dst"

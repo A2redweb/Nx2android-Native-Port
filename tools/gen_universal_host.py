@@ -18,6 +18,7 @@ if dm.exists(): shutil.rmtree(dm)
 shutil.copytree(up / 'nxnative' / 'dm', dm, symlinks=True)
 _ap = dm / 'android' / 'tools' / 'android_profile.py'   # the profile check wants the README images of the whole repository, which this copy of dm/ does not carry
 _t = _ap.read_text(); _ap.write_text(_t.replace("not (ANDROID.parents[2] / self.get('readme_image')).is_file()", "False"))
+import os; os.environ['DM_GAMES_DIR'] = str(Path(__file__).resolve().parent.parent / 'profiles_extra')   # games upstream has no profile for (made here), searched after dm/games
 sys.path.insert(0, str(dm / 'games')); sys.path.insert(0, str(dm / 'android' / 'tools'))
 import game, android_profile   # noqa: E402
 

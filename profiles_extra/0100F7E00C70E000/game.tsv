@@ -1,0 +1,37 @@
+# Hogwarts Legacy (Avalanche Software / Warner Bros.): Unreal Engine 4.27 (Phoenix project), NVN, SDK 17.5.4, update 1.0.5; version 11 paks (index not encrypted) with IoStore containers
+# beside them; shader code archives (SF_GLSL_SWITCH) in pakchunk0 (Phoenix_Chunk0 and Global), pakchunk9 and pakchunk10; Oodle in the paks; Wwise sound; Bink video.
+# Made by hand from the app's survey of the dump (main.npdm: 64-bit, system resource 0x1000000 = virtual address memory), not by upstream: upstream has no profile for this game.
+# The memory split is the one of the other Unreal Engine 4.27 profiles (Dragon Quest VII Reimagined) with this game's own system resource; no per-build engine rows yet
+# (ue_malloc.tsv / fps_locks.tsv need main analysed), so it starts on the engine's own allocator and its own frame limit. Untested: the first run decides what to change.
+
+# ---- Identity ----
+title_id	0100F7E00C70E000
+program_id	0100F7E00C70E000
+
+# ---- App ----
+name	Hogwarts Legacy
+ipa	HogwartsLegacy.ipa
+app_category	public.app-category.games
+
+# ---- Versions ----
+build	v65536	1.0.5	main=0c00fc37b0610fbdb2cf73aed0cc73e7	subsdk0=d0c48eef6dc2f1e7ac8b8dd5b5b03a60	sdk=1ea0b9fe6cd6867b18e374a5d53d7950
+package	v65536
+shader_versions	v65536
+
+# ---- Files ----
+modules	main subsdk0 sdk
+romfs_marker	Phoenix/Content/Paks/pakchunk0-Switch.pak
+zip_store	.pak:.ucas:.utoc:.bk2:.ttf
+
+# ---- Graphics / memory ----
+fps_target	0
+mem_reserve	0xF0000000
+mem_alias	0xC8000000
+mem_stack	0x10000000
+app_pool	0xCD500000
+sys_resource	0x1000000
+
+pad_layout	full
+
+shader_groups	ShaderArchive-Global-=global ShaderArchive-=game
+shader_note	Hogwarts Legacy shaders

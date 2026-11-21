@@ -150,3 +150,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 }
+
+#[cfg(test)]
+mod extra_profiles {
+    /// the profiles made here (profiles_extra/) load with the same strict reader as upstream's
+    #[test]
+    fn profiles_extra_load() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles_extra");
+        let json = crate::games_json(dir.to_str().unwrap(), "", true);
+        assert!(json.contains("Hogwarts Legacy") && !json.contains("\"error\""), "{json}");
+    }
+}
