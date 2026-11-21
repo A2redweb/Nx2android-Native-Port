@@ -623,7 +623,23 @@ fn par_scan(total: usize, threads: usize, host: &HostSpec, label: &str, work: Wo
     result
 }
 
+/// what the records looked like (total, starting LSLG, holding the GLSLC magic, a few first bytes), for a scan that finds nothing
+static DIAG: std::sync::Mutex<(usize, usize, usize, Vec<String>)> = std::sync::Mutex::new((0, 0, 0, Vec::new()));
+
 fn scan_record(d: &[u8], label: String) -> Vec<Found> {
+    if let Ok(mut g) = DIAG.lock() {
+        g.0 += 1;
+        if d.get(..4) == Some(b"LSLG") {
+            g.1 += 1;
+        }
+        if d.windows(4).any(|w| w == [0x91, 0x68, 0x86, 0x19]) {
+            g.2 += 1;
+        }
+        if g.3.len() < 4 && g.0 % 20011 == 1 {
+            let h: String = d.iter().take(40).map(|b| format!("{b:02x}")).collect();
+            g.3.push(format!("{} bytes {h}", d.len()));
+        }
+    }
     let mut found = vec![];
     if scan_blob(d, &label, &mut found).is_err() {
         found.clear();
@@ -673,6 +689,9 @@ pub fn scan_unreal(romfs: &Path, main: &Path, host: &HostSpec, threads: usize, a
     let mut out = Outcome { members: 0, failed: 0, notes: vec![] };
     let _ = std::fs::create_dir_all(&host.log_dir);
     let (paks, tocs) = unreal_files(romfs);
+    if let Ok(mut g) = DIAG.lock() {
+        *g = (0, 0, 0, vec![]);
+    }
     let mut img: Option<(Vec<u8>, usize)> = None;
     let mut key_for = |block: &[u8; 16]| -> Result<Aes256, String> {
         if img.is_none() {
@@ -726,6 +745,11 @@ pub fn scan_unreal(romfs: &Path, main: &Path, host: &HostSpec, threads: usize, a
             };
             par_scan(a.shaders.len(), threads, host, "pak", &work, add, &|d, n| progress("reading the game's shader archives", d, n), &mut out)?;
             out.members += a.shaders.len();
+        }
+    }
+    if let Ok(g) = DIAG.lock() {
+        if g.0 > 0 {
+            out.notes.insert(0, format!("Unreal shader records: {} read, {} start LSLG, {} hold the GLSLC magic; first bytes: {}", g.0, g.1, g.2, g.3.join(" | ")));
         }
     }
     Ok(out)
