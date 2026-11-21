@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import java.io.File
 
 /** Games: what has been ported, with Play and Delete, and the list of games this app has a profile for. */
@@ -98,6 +99,10 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
         dlg.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val box = ui.column(16).apply { background = ui.shape(Theme.card, 14, Theme.line) }
         val sc = ui.scroll(box)
+        // how much the game takes is a walk over all its files (a ported game has tens of thousands of shader files): it runs off the main thread, the sheet opens at once
+        var onPhone = "calculating size…"
+        var sizeLine: TextView? = null
+        var prefix = ""
         fun build() {
             box.removeAllViews()
             val ready = File(g, "mods").isDirectory
@@ -114,7 +119,8 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
             else if (rw.isNotEmpty()) notes.add("Code: $rw")
             if (sh.isNotEmpty()) notes.add("Shaders: $sh")
             if (File(g, "aoc").isDirectory) notes.add("Add-on content: ${File(g, "aoc").list()?.size ?: 0}")
-            box.addView(ui.sm(notes.joinToString("\n") + (if (notes.isEmpty()) "" else "\n") + Catalog.human(Catalog.size(g)) + " on this phone"), ui.lp(top = 8, bottom = 4))
+            prefix = notes.joinToString("\n") + (if (notes.isEmpty()) "" else "\n")
+            sizeLine = ui.sm(prefix + onPhone).also { box.addView(it, ui.lp(top = 8, bottom = 4)) }
             action(box, "Play", "Starts the game. Its pause menu (the menu button on screen) has the gamepad, mode, saves and a Cheats tab.", true, ready) {
                 dlg.dismiss(); a.startActivity(Intent(a, PlayActivity::class.java).putExtra(PlayActivity.EXTRA_GAME, g.name))
             }
@@ -149,6 +155,11 @@ class GamesTab(private val a: MainActivity, private val ui: Ui) : Tab {
             box.addView(ui.button("Close") { dlg.dismiss() }, ui.lp(top = 14))
         }
         build()
+        Thread {
+            try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) } catch (_: Exception) {}
+            val n = try { Catalog.size(g) } catch (_: Exception) { -1L }
+            a.runOnUiThread { onPhone = if (n >= 0) Catalog.human(n) + " on this phone" else ""; sizeLine?.text = prefix + onPhone }
+        }.start()
         dlg.setContentView(sc)
         dlg.window?.apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
