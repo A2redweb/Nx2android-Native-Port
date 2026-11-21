@@ -31,7 +31,7 @@ object LogShare {
             if (lastSkips.isNotEmpty()) out.append("LAST COUNT: ").append(lastSkips).append('\n')
             sb.append("\n== key lines of the game's log (the GPU and driver, every red line, skipped draws; repeats left out) ==\n").append(out.toString().ifBlank { "(none: the game has not run since the app was installed)\n" })
         }
-        for (f in listOf("rewrite.txt", "shaders.txt")) File(dir, f).takeIf { it.isFile }?.let { sb.append("\n== ").append(f).append(" ==\n").append(it.readText().trim()).append('\n') }
+        for (f in listOf("survey.txt", "rewrite.txt", "shaders.txt")) File(dir, f).takeIf { it.isFile }?.let { sb.append("\n== ").append(f).append(" ==\n").append(it.readText().trim()).append('\n') }
         File(dir, "port.log").takeIf { it.isFile }?.let { sb.append("\n== port log ==\n").append(it.readText().trim()).append('\n') }
         File(dir, "trace_latest.txt").takeIf { it.isFile }?.let {   // taken with Volume down while playing: every pass and draw the GPU was given for two frames
             val t = it.readText()

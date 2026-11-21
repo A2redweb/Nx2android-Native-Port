@@ -4,6 +4,7 @@
 use nx_extract::Opened;
 use std::collections::HashMap;
 use std::path::Path;
+pub mod survey;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -57,12 +58,14 @@ pub fn write_switch_files(profiles: &Path, id: &str, game_dir: &Path, language: 
 /// Rewrites the game's code modules into `mods/` of its data folder (what the host loads: `<module>.patched.bin` with its `.fixups.tsv` and `.gates.tsv`).
 /// The modules are the profile's `modules` row; `cuts_tsv` and `framestep_tsv` are `cuts.tsv` and `framestep.tsv` of `tools/gen_cuts.py`. `mods/` appears only when every module is done. Returns a one-line summary.
 pub fn rewrite_modules(profiles: &Path, cuts_tsv: &str, framestep_tsv: &str, id: &str, game_dir: &Path) -> Result<String, String> {
-    let dir = std::fs::read_dir(profiles)
-        .map_err(|e| format!("{}: {e}", profiles.display()))?
-        .filter_map(Result::ok)
-        .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(id))
-        .map(|e| e.path())
-        .ok_or_else(|| format!("no profile for {id}"))?;
+    let dir = match find_profile(profiles, id) {
+        Ok(d) => d,
+        Err(e) => {
+            // no profile: write what the game's own files say, so one can be made from facts (sent with the shared log)
+            let _ = std::fs::write(game_dir.join("survey.txt"), survey::survey(game_dir));
+            return Err(e);
+        }
+    };
     let g = nx_profile::GameProfile::load(&dir).map_err(|e| format!("{id}: {e}"))?;
     let mut modules: Vec<String> = g.values("modules").into_iter().flat_map(|r| r.iter().flat_map(|w| w.split_whitespace().map(String::from)).collect::<Vec<_>>()).collect();
     if modules.is_empty() {
