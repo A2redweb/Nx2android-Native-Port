@@ -73,6 +73,104 @@ const M11: [u8; 256] = build_mul(11);
 const M13: [u8; 256] = build_mul(13);
 const M14: [u8; 256] = build_mul(14);
 
+/// An AES-256 key, expanded (Unreal Engine pak index and IoStore encryption).
+#[derive(Clone)]
+pub struct Aes256 {
+    rk: [[u8; 16]; 15],
+}
+
+impl Aes256 {
+    pub fn new(key: &[u8; 32]) -> Self {
+        let mut w = [[0u8; 4]; 60];
+        for i in 0..8 {
+            w[i].copy_from_slice(&key[4 * i..4 * i + 4]);
+        }
+        let mut rcon = 1u8;
+        for i in 8..60 {
+            let mut t = w[i - 1];
+            if i % 8 == 0 {
+                t = [SBOX[t[1] as usize] ^ rcon, SBOX[t[2] as usize], SBOX[t[3] as usize], SBOX[t[0] as usize]];
+                rcon = xtime(rcon);
+            } else if i % 8 == 4 {
+                t = [SBOX[t[0] as usize], SBOX[t[1] as usize], SBOX[t[2] as usize], SBOX[t[3] as usize]];
+            }
+            for j in 0..4 {
+                w[i][j] = w[i - 8][j] ^ t[j];
+            }
+        }
+        let mut rk = [[0u8; 16]; 15];
+        for (r, k) in rk.iter_mut().enumerate() {
+            for c in 0..4 {
+                k[4 * c..4 * c + 4].copy_from_slice(&w[4 * r + c]);
+            }
+        }
+        Aes256 { rk }
+    }
+
+    /// From a slice; `None` unless it is 32 bytes.
+    pub fn from_slice(key: &[u8]) -> Option<Self> {
+        Some(Self::new(key.try_into().ok()?))
+    }
+
+    pub fn decrypt_block(&self, block: &mut [u8; 16]) {
+        Aes128::add_round_key(block, &self.rk[14]);
+        for r in (0..14).rev() {
+            let s = *block;
+            for c in 0..4 {
+                for row in 0..4 {
+                    block[4 * ((c + row) % 4) + row] = s[4 * c + row];
+                }
+            }
+            for b in block.iter_mut() {
+                *b = INV_SBOX[*b as usize];
+            }
+            Aes128::add_round_key(block, &self.rk[r]);
+            if r != 0 {
+                for c in 0..4 {
+                    let a = [block[4 * c], block[4 * c + 1], block[4 * c + 2], block[4 * c + 3]];
+                    block[4 * c] = M14[a[0] as usize] ^ M11[a[1] as usize] ^ M13[a[2] as usize] ^ M9[a[3] as usize];
+                    block[4 * c + 1] = M9[a[0] as usize] ^ M14[a[1] as usize] ^ M11[a[2] as usize] ^ M13[a[3] as usize];
+                    block[4 * c + 2] = M13[a[0] as usize] ^ M9[a[1] as usize] ^ M14[a[2] as usize] ^ M11[a[3] as usize];
+                    block[4 * c + 3] = M11[a[0] as usize] ^ M13[a[1] as usize] ^ M9[a[2] as usize] ^ M14[a[3] as usize];
+                }
+            }
+        }
+    }
+
+    pub fn encrypt_block(&self, block: &mut [u8; 16]) {
+        Aes128::add_round_key(block, &self.rk[0]);
+        for r in 1..=14 {
+            for b in block.iter_mut() {
+                *b = SBOX[*b as usize];
+            }
+            let s = *block;
+            for c in 0..4 {
+                for row in 0..4 {
+                    block[4 * c + row] = s[4 * ((c + row) % 4) + row];
+                }
+            }
+            if r != 14 {
+                for c in 0..4 {
+                    let a = [block[4 * c], block[4 * c + 1], block[4 * c + 2], block[4 * c + 3]];
+                    block[4 * c] = M2[a[0] as usize] ^ M3[a[1] as usize] ^ a[2] ^ a[3];
+                    block[4 * c + 1] = a[0] ^ M2[a[1] as usize] ^ M3[a[2] as usize] ^ a[3];
+                    block[4 * c + 2] = a[0] ^ a[1] ^ M2[a[2] as usize] ^ M3[a[3] as usize];
+                    block[4 * c + 3] = M3[a[0] as usize] ^ a[1] ^ a[2] ^ M2[a[3] as usize];
+                }
+            }
+            Aes128::add_round_key(block, &self.rk[r]);
+        }
+    }
+
+    /// ECB over whole blocks, in place. `data.len()` must be a multiple of 16.
+    pub fn ecb_decrypt(&self, data: &mut [u8]) {
+        assert!(data.len() % 16 == 0, "ECB needs whole 16-byte blocks");
+        for c in data.chunks_exact_mut(16) {
+            self.decrypt_block(c.try_into().unwrap());
+        }
+    }
+}
+
 /// An AES-128 key, expanded.
 #[derive(Clone)]
 pub struct Aes128 {
@@ -266,6 +364,19 @@ pub fn from_hex(s: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn aes256_matches_fips_197() {
+        let key: Vec<u8> = (0u8..32).collect();
+        let a = Aes256::from_slice(&key).unwrap();
+        let pt: [u8; 16] = core::array::from_fn(|i| (i * 0x11) as u8);
+        let ct = from_hex("8ea2b7ca516745bfeafc49904b496089");
+        let mut b = pt;
+        a.encrypt_block(&mut b);
+        assert_eq!(&b[..], &ct[..]);
+        a.decrypt_block(&mut b);
+        assert_eq!(b, pt);
+    }
     use super::*;
 
     fn b16(s: &str) -> [u8; 16] {
