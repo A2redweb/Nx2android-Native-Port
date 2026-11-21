@@ -187,6 +187,7 @@ class PortService : Service() {
             getSystemService(NotificationManager::class.java).notify(1, notification("${Ports.title}: $stage (${(Ports.frac * 100).toInt()}%)"))
             if (state == "done") {
                 Ports.end("Extract the game", true, "${s.optString("name")} ${s.optString("display_version")}, ${s.optInt("romfs_files")} RomFS files")
+                if (s.optString("message").isNotEmpty()) Ports.say(s.optString("message"))
                 return s.optString("title_id")
             }
             if (state == "failed") {

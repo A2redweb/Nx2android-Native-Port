@@ -414,9 +414,21 @@ fn run(job: &Arc<Job>, r: &ExtractRequest) -> Result<nx_extract::Report, String>
     let res = nx_extract::extract_game(base.package, upd.map(|u| u.package), &keys, Path::new(&r.out_dir)).map_err(|e| e.to_string());
     let _ = std::fs::remove_dir_all(&r.tmp_dir); // decompressed copies, if any
     let rep = res?;
+    let mut skipped: Vec<String> = Vec::new();
     for (i, (path, name)) in r.dlc.iter().enumerate() {
         set(job, |s| s.stage = format!("Add-on content {} of {}", i + 1, r.dlc.len()));
-        add_dlc(&keys, Path::new(&r.out_dir), rep.title_id, path, name, i, job, &progress)?;
+        // A DLC that cannot be read must not throw away the finished game: skip it and say why.
+        if let Err(e) = add_dlc(&keys, Path::new(&r.out_dir), rep.title_id, path, name, i, job, &progress) {
+            if job.cancel.load(Ordering::Relaxed) || e.contains("cancelled") {
+                return Err(e);
+            }
+            let _ = std::fs::remove_dir_all(Path::new(&r.out_dir).join("aoc").join(format!(".part{i}")));
+            skipped.push(format!("{name}: {e}"));
+        }
+    }
+    if !skipped.is_empty() {
+        let m = format!("The game was extracted, but add-on content was skipped. {}", skipped.join("; "));
+        set(job, |s| s.message = m);
     }
     Ok(rep)
 }

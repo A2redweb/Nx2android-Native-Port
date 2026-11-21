@@ -99,7 +99,14 @@ impl<R: Read + Seek> Package<R> {
         let tk = if h.uses_rights_id() { self.tickets.iter().find(|t| t.rights_id == h.rights_id).and_then(|t| t.title_key(keys, h.key_generation)) } else { None };
         match section_key(h, keys, tk) {
             Some(k) => Ok(k),
-            None if h.uses_rights_id() => msg(format!("{}: no common ticket for its rights ID (or the master key / titlekek_source is missing in prod.keys)", nca.name)),
+            None if h.uses_rights_id() => {
+                let have = self.tickets.iter().any(|t| t.rights_id == h.rights_id);
+                if have {
+                    msg(format!("{}: its ticket is there, but prod.keys lacks master key {:02x} (key generation {}); dump prod.keys again from a console on the latest firmware", nca.name, h.key_generation.saturating_sub(1), h.key_generation))
+                } else {
+                    msg(format!("{}: this dump has no usable ticket for it (a personalised ticket cannot be used without the console's own key); use a dump with a common ticket, or leave the add-on out", nca.name))
+                }
+            }
             None => msg(format!("{}: prod.keys lacks the key area key for key generation {} (master_key_{:02x} and the three source keys)", nca.name, h.key_generation, h.key_generation.saturating_sub(1))),
         }
     }
